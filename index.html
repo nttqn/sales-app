@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SalesFlow - Quản lý bán hàng</title>
+  <meta name="description" content="Quản lý đơn hàng, tồn kho, doanh thu và lợi nhuận">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="app">
+    <!-- Toast -->
+    <div id="toast" class="toast" aria-live="polite"></div>
+
+    <!-- Offline / sync banner -->
+    <div id="net-banner" class="net-banner"></div>
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <span class="app-logo">🛒</span>
+        <h1>SalesFlow</h1>
+      </div>
+      <div class="header-right">
+        <button id="btn-sync-status" class="icon-btn sync-btn" aria-label="Trạng thái đồng bộ">
+          <i data-lucide="refresh-cw"></i>
+          <span id="sync-badge" class="sync-badge" hidden>0</span>
+        </button>
+        <button id="btn-settings" class="icon-btn" aria-label="Cài đặt">
+          <i data-lucide="settings"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- ==================== PAGES ==================== -->
+    <main class="app-content" id="app-content">
+      <!-- Pages are rendered here by src/main.js router -->
+    </main>
+
+    <!-- ==================== BOTTOM NAV ==================== -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-page="dashboard">
+        <i data-lucide="layout-dashboard"></i>
+        <span>Tổng quan</span>
+      </button>
+      <button class="nav-btn" data-page="orders">
+        <i data-lucide="receipt"></i>
+        <span>Đơn hàng</span>
+      </button>
+      <button class="nav-btn add-btn" data-page="pos">
+        <div class="add-btn-inner">
+          <i data-lucide="shopping-cart"></i>
+        </div>
+        <span>Bán hàng</span>
+      </button>
+      <button class="nav-btn" data-page="products">
+        <i data-lucide="package"></i>
+        <span>Sản phẩm</span>
+      </button>
+      <button class="nav-btn" data-page="reports">
+        <i data-lucide="pie-chart"></i>
+        <span>Báo cáo</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- Settings Modal -->
+  <div id="modal-settings" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Cài đặt</h3>
+        <button class="icon-btn close-modal" aria-label="Đóng">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="settings-user-email" class="form-label" style="margin-bottom: 16px;"></p>
+        <button id="btn-sync-now" class="setting-btn">
+          <i data-lucide="refresh-cw"></i>
+          <span>Đồng bộ ngay</span>
+        </button>
+        <div class="modal-divider"></div>
+        <button id="btn-logout" class="setting-btn danger">
+          <i data-lucide="log-out"></i>
+          <span>Đăng xuất</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm Modal -->
+  <div id="modal-confirm" class="modal-overlay">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h3 id="confirm-title">Xác nhận</h3>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-message">Bạn có chắc chắn muốn thực hiện?</p>
+      </div>
+      <div class="modal-footer">
+        <button id="confirm-cancel" class="btn-secondary">Hủy</button>
+        <button id="confirm-ok" class="btn-danger">Xác nhận</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
