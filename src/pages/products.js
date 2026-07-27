@@ -508,7 +508,7 @@ async function openHistoryModal(container, product) {
     return;
   }
 
-  const reasonLabel = { sale: 'Bán hàng', restock: 'Nhập kho', adjustment: 'Điều chỉnh' };
+  const reasonLabel = { sale: 'Bán hàng', restock: 'Nhập kho', adjustment: 'Điều chỉnh', return: 'Hoàn kho (đơn hủy/chuyển hoàn)' };
 
   listEl.innerHTML = data
     .map((m) => {

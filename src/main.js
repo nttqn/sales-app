@@ -32,6 +32,8 @@ import {
   Tags,
   Plus,
   Check,
+  Users,
+  Truck,
 } from 'lucide';
 import { supabase } from './lib/supabase.js';
 
@@ -58,6 +60,8 @@ const usedIcons = {
   Tags,
   Plus,
   Check,
+  Users,
+  Truck,
 };
 import { showToast } from './lib/ui.js';
 import { initSync, syncPendingOrders, onSyncStateChange } from './lib/sync.js';
@@ -67,6 +71,7 @@ import { renderPos } from './pages/pos.js';
 import { renderOrders } from './pages/orders.js';
 import { renderProducts } from './pages/products.js';
 import { renderReports } from './pages/reports.js';
+import { renderCustomers } from './pages/customers.js';
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip, Filler);
 window.Chart = Chart;
@@ -84,6 +89,7 @@ const pages = {
   orders: renderOrders,
   products: renderProducts,
   reports: renderReports,
+  customers: renderCustomers,
 };
 
 const state = { currentPage: 'dashboard' };

@@ -1,5 +1,11 @@
 import { supabase } from '../lib/supabase.js';
-import { cacheProducts, getCachedProducts, queuePendingOrder } from '../lib/db.js';
+import {
+  cacheProducts,
+  getCachedProducts,
+  cacheCustomers,
+  getCachedCustomers,
+  queuePendingOrder,
+} from '../lib/db.js';
 import { showToast, formatCurrency } from '../lib/ui.js';
 import { syncPendingOrders } from '../lib/sync.js';
 
@@ -11,12 +17,16 @@ const state = {
   paymentMethod: 'cash',
   discount: 0,
   shippingFee: 0, // chi phí ship trả cho đơn vị vận chuyển (kênh online), không phải phí thu khách
+  customers: [],
+  customer: { name: '', phone: '', address: '', note: '' },
+  customerSuggestions: [],
   realtimeChannel: null,
+  customerRealtimeChannel: null,
   checkingOut: false,
 };
 
 export async function renderPos(container) {
-  await loadProducts();
+  await Promise.all([loadProducts(), loadCustomers()]);
   paint(container);
   wireEvents(container);
   subscribeRealtime(container);
@@ -39,15 +49,37 @@ async function loadProducts() {
   state.products = cached.filter((p) => p.is_active);
 }
 
+async function loadCustomers() {
+  if (navigator.onLine) {
+    const { data, error } = await supabase.from('customers').select('*');
+    if (!error) {
+      state.customers = data;
+      await cacheCustomers(data);
+      return;
+    }
+  }
+  state.customers = await getCachedCustomers();
+}
+
 function subscribeRealtime(container) {
-  if (state.realtimeChannel) return;
-  state.realtimeChannel = supabase
-    .channel('pos-products-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, async () => {
-      await loadProducts();
-      renderProductGrid(container);
-    })
-    .subscribe();
+  if (!state.realtimeChannel) {
+    state.realtimeChannel = supabase
+      .channel('pos-products-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, async () => {
+        await loadProducts();
+        renderProductGrid(container);
+      })
+      .subscribe();
+  }
+
+  if (!state.customerRealtimeChannel) {
+    state.customerRealtimeChannel = supabase
+      .channel('pos-customers-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, async () => {
+        await loadCustomers();
+      })
+      .subscribe();
+  }
 }
 
 function getFilteredProducts() {
@@ -56,6 +88,27 @@ function getFilteredProducts() {
   return state.products.filter(
     (p) => p.name.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q)
   );
+}
+
+function updateCustomerSuggestions() {
+  const q = state.customer.phone.trim();
+  if (!q) {
+    state.customerSuggestions = [];
+    return;
+  }
+  state.customerSuggestions = state.customers.filter((c) => c.phone.startsWith(q)).slice(0, 6);
+}
+
+function applyCustomerSuggestion(customerId) {
+  const customer = state.customers.find((c) => c.id === customerId);
+  if (!customer) return;
+  state.customer = {
+    name: customer.name,
+    phone: customer.phone,
+    address: customer.address || '',
+    note: customer.note || '',
+  };
+  state.customerSuggestions = [];
 }
 
 function computeTotals() {
@@ -157,6 +210,10 @@ function cartBodyHtml() {
         </div>
       </div>
 
+      <div id="pos-customer-section">
+        ${customerSectionHtml()}
+      </div>
+
       <div class="pos-field-row">
         <label>Thanh toán</label>
         <select id="pos-payment">
@@ -217,6 +274,56 @@ function cartRowHtml(item, idx) {
     </div>`;
 }
 
+function customerSectionHtml() {
+  const required = state.channel === 'online';
+  const mark = required ? ' *' : '';
+  return `
+    <div class="pos-customer-label">
+      Thông tin khách hàng ${required ? '<span class="required-mark">*</span>' : '<span class="optional-mark">(tùy chọn)</span>'}
+    </div>
+    <div class="pos-customer-field" style="position: relative;">
+      <input type="tel" id="pos-customer-phone" class="form-input" placeholder="Số điện thoại${mark}" value="${escapeAttr(state.customer.phone)}" autocomplete="off">
+      <div id="pos-customer-suggestions">${customerSuggestionsHtml()}</div>
+    </div>
+    <div class="pos-customer-field">
+      <input type="text" id="pos-customer-name" class="form-input" placeholder="Tên khách hàng${mark}" value="${escapeAttr(state.customer.name)}">
+    </div>
+    <div class="pos-customer-field">
+      <input type="text" id="pos-customer-address" class="form-input" placeholder="Địa chỉ${mark}" value="${escapeAttr(state.customer.address)}">
+    </div>
+    <div class="pos-customer-field">
+      <input type="text" id="pos-customer-note" class="form-input" placeholder="Lưu ý riêng (tùy chọn)" value="${escapeAttr(state.customer.note)}">
+    </div>`;
+}
+
+function customerSuggestionsHtml() {
+  if (!state.customerSuggestions.length) return '';
+  return `
+    <div class="customer-suggestions">
+      ${state.customerSuggestions
+        .map(
+          (c) => `
+        <button type="button" class="customer-suggestion-item" data-id="${c.id}">
+          <span class="customer-suggestion-name">${escapeHtml(c.name)}</span>
+          <span class="customer-suggestion-phone">${escapeHtml(c.phone)}</span>
+        </button>`
+        )
+        .join('')}
+    </div>`;
+}
+
+function renderCustomerSuggestions(container) {
+  const el = container.querySelector('#pos-customer-suggestions');
+  if (!el) return;
+  el.innerHTML = customerSuggestionsHtml();
+}
+
+function renderCustomerSection(container) {
+  const el = container.querySelector('#pos-customer-section');
+  if (!el) return;
+  el.innerHTML = customerSectionHtml();
+}
+
 function renderProductGrid(container) {
   const el = container.querySelector('#pos-product-list');
   if (!el) return;
@@ -255,11 +362,29 @@ function wireEvents(container) {
     if (e.target.id === 'pos-shipping') {
       state.shippingFee = Number(e.target.value) || 0;
     }
+    if (e.target.id === 'pos-customer-phone') {
+      state.customer.phone = e.target.value;
+      updateCustomerSuggestions();
+      renderCustomerSuggestions(container);
+    }
+    if (e.target.id === 'pos-customer-name') state.customer.name = e.target.value;
+    if (e.target.id === 'pos-customer-address') state.customer.address = e.target.value;
+    if (e.target.id === 'pos-customer-note') state.customer.note = e.target.value;
   });
 
   container.addEventListener('change', (e) => {
     if (e.target.id === 'pos-payment') {
       state.paymentMethod = e.target.value;
+    }
+  });
+
+  container.addEventListener('focusout', (e) => {
+    if (e.target.id === 'pos-customer-phone') {
+      // Delay so a click on a suggestion button registers before the list is hidden.
+      setTimeout(() => {
+        state.customerSuggestions = [];
+        renderCustomerSuggestions(container);
+      }, 150);
     }
   });
 
@@ -276,6 +401,13 @@ function wireEvents(container) {
       state.channel = channelBtn.dataset.channel;
       if (state.channel !== 'online') state.shippingFee = 0;
       renderCart(container);
+      return;
+    }
+
+    const suggestionBtn = e.target.closest('.customer-suggestion-item');
+    if (suggestionBtn) {
+      applyCustomerSuggestion(suggestionBtn.dataset.id);
+      renderCustomerSection(container);
       return;
     }
 
@@ -308,6 +440,15 @@ function wireEvents(container) {
 async function handleCheckout(container) {
   if (!state.cart.length || state.checkingOut) return;
 
+  const customerName = state.customer.name.trim();
+  const customerPhone = state.customer.phone.trim();
+  const customerAddress = state.customer.address.trim();
+
+  if (state.channel === 'online' && (!customerName || !customerPhone || !customerAddress)) {
+    showToast('Đơn online bắt buộc phải có đầy đủ tên, số điện thoại và địa chỉ khách hàng', 'error');
+    return;
+  }
+
   state.checkingOut = true;
   renderTotals(container);
 
@@ -315,12 +456,17 @@ async function handleCheckout(container) {
   const order = {
     id: crypto.randomUUID(),
     channel: state.channel,
-    status: 'completed',
+    // status không set ở client — RPC create_order tự quyết định: 'completed'
+    // ngay cho đơn tại quầy, 'new' cho đơn online để đi qua luồng fulfillment.
     payment_method: state.paymentMethod,
     subtotal: totals.subtotal,
     discount: totals.discount,
     total: totals.total,
     shipping_fee: state.channel === 'online' ? Number(state.shippingFee) || 0 : 0,
+    customer_name: customerName || null,
+    customer_phone: customerPhone || null,
+    customer_address: customerAddress || null,
+    customer_note: state.customer.note.trim() || null,
     note: null,
     created_offline: !navigator.onLine,
   };
@@ -337,6 +483,8 @@ async function handleCheckout(container) {
   state.cart = [];
   state.discount = 0;
   state.shippingFee = 0;
+  state.customer = { name: '', phone: '', address: '', note: '' };
+  state.customerSuggestions = [];
   state.checkingOut = false;
   renderCart(container);
 

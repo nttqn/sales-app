@@ -63,6 +63,22 @@ begin
   end if;
 end $$;
 
+-- ========== CUSTOMERS ==========
+create table if not exists customers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  phone text not null unique,
+  address text,
+  note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists customers_set_updated_at on customers;
+create trigger customers_set_updated_at
+before update on customers
+for each row execute function set_updated_at();
+
 -- ========== ORDERS ==========
 -- id được sinh ở client (uuid) để idempotent khi retry đồng bộ offline
 create table if not exists orders (
@@ -74,6 +90,11 @@ create table if not exists orders (
   discount numeric(14,2) not null default 0,
   total numeric(14,2) not null default 0,
   shipping_fee numeric(14,2) not null default 0,
+  customer_id uuid references customers(id) on delete set null,
+  customer_name text,
+  customer_phone text,
+  customer_address text,
+  customer_note text,
   note text,
   created_offline boolean not null default false,
   sync_status text not null default 'synced' check (sync_status in ('synced', 'conflict')),
@@ -81,9 +102,44 @@ create table if not exists orders (
   created_at timestamptz not null default now()
 );
 
--- Migration-safe: adds the column when running this file against a database
--- that already has the orders table from before shipping_fee existed.
+-- Migration-safe: adds the columns when running this file against a database
+-- that already has the orders table from before shipping_fee/customer existed.
 alter table orders add column if not exists shipping_fee numeric(14,2) not null default 0;
+alter table orders add column if not exists customer_id uuid references customers(id) on delete set null;
+alter table orders add column if not exists customer_name text;
+alter table orders add column if not exists customer_phone text;
+alter table orders add column if not exists customer_address text;
+alter table orders add column if not exists customer_note text;
+
+-- Mở rộng trạng thái đơn hàng cho luồng fulfillment của đơn Online:
+-- new (đơn mới) -> shipping (đang vận chuyển) -> completed (hoàn thành) | returned (chuyển hoàn)
+--   | cancelled (đã hủy) | lost (thất lạc/mất hàng).
+-- Đơn tại quầy vẫn tạo thẳng ở completed như trước (xem create_order bên dưới).
+-- Dò constraint check hiện có trên đúng cột "status" theo conkey (không đoán tên, không nhầm với
+-- sync_status) để xóa rồi tạo lại với danh sách giá trị mới nhất — an toàn khi chạy lại file nhiều lần
+-- kể cả khi danh sách giá trị đã đổi giữa các lần chạy trước.
+do $$
+declare
+  v_conname text;
+  v_status_attnum smallint;
+begin
+  select attnum into v_status_attnum
+  from pg_attribute
+  where attrelid = 'orders'::regclass and attname = 'status';
+
+  select conname into v_conname
+  from pg_constraint
+  where conrelid = 'orders'::regclass
+    and contype = 'c'
+    and conkey = array[v_status_attnum];
+
+  if v_conname is not null then
+    execute format('alter table orders drop constraint %I', v_conname);
+  end if;
+
+  alter table orders add constraint orders_status_check
+    check (status in ('new', 'shipping', 'cancelled', 'returned', 'completed', 'lost'));
+end $$;
 
 create index if not exists orders_created_at_idx on orders (created_at desc);
 create index if not exists orders_channel_idx on orders (channel);
@@ -118,6 +174,31 @@ create table if not exists stock_movements (
 
 create index if not exists stock_movements_product_id_idx on stock_movements (product_id);
 
+-- Thêm reason 'return' (hoàn kho khi đơn chuyển hoàn/hủy) vào constraint hiện có, cùng cách dò
+-- theo conkey như trên để an toàn khi chạy lại file nhiều lần.
+do $$
+declare
+  v_conname text;
+  v_reason_attnum smallint;
+begin
+  select attnum into v_reason_attnum
+  from pg_attribute
+  where attrelid = 'stock_movements'::regclass and attname = 'reason';
+
+  select conname into v_conname
+  from pg_constraint
+  where conrelid = 'stock_movements'::regclass
+    and contype = 'c'
+    and conkey = array[v_reason_attnum];
+
+  if v_conname is not null then
+    execute format('alter table stock_movements drop constraint %I', v_conname);
+  end if;
+
+  alter table stock_movements add constraint stock_movements_reason_check
+    check (reason in ('sale', 'restock', 'adjustment', 'return'));
+end $$;
+
 -- ============================================
 -- RPC: create_order
 -- Insert 1 đơn hàng + các item trong 1 transaction, trừ tồn kho có điều kiện.
@@ -140,19 +221,52 @@ declare
   v_shortfall numeric;
   v_deduct numeric;
   v_has_conflict boolean := false;
+  v_customer_id uuid;
+  v_customer_name text := nullif(trim(v_order->>'customer_name'), '');
+  v_customer_phone text := nullif(trim(v_order->>'customer_phone'), '');
+  v_customer_address text := nullif(trim(v_order->>'customer_address'), '');
+  v_customer_note text := nullif(trim(v_order->>'customer_note'), '');
 begin
+  -- Đơn online bắt buộc có đầy đủ thông tin khách hàng (giao hàng cần tên/SDT/địa chỉ).
+  -- Đơn tại quầy thông tin khách hàng là tùy chọn.
+  if v_order->>'channel' = 'online'
+     and (v_customer_name is null or v_customer_phone is null or v_customer_address is null) then
+    raise exception 'Đơn online bắt buộc phải có đầy đủ tên, số điện thoại và địa chỉ khách hàng';
+  end if;
+
+  -- Chỉ ghi vào danh bạ khách hàng khi có đủ tên + SĐT (địa chỉ/ghi chú có thể bổ sung sau
+  -- qua trang Quản lý khách hàng). Không ghi đè hồ sơ khách đã có, chỉ tạo mới nếu SĐT chưa tồn tại.
+  if v_customer_name is not null and v_customer_phone is not null then
+    insert into customers (name, phone, address, note)
+    values (v_customer_name, v_customer_phone, v_customer_address, v_customer_note)
+    on conflict (phone) do nothing
+    returning id into v_customer_id;
+
+    if v_customer_id is null then
+      select id into v_customer_id from customers where phone = v_customer_phone;
+    end if;
+  end if;
+
   insert into orders (
-    id, channel, status, payment_method, subtotal, discount, total, shipping_fee, note, created_offline, created_by
+    id, channel, status, payment_method, subtotal, discount, total, shipping_fee,
+    customer_id, customer_name, customer_phone, customer_address, customer_note,
+    note, created_offline, created_by
   )
   values (
     v_order_id,
     v_order->>'channel',
-    coalesce(v_order->>'status', 'completed'),
+    -- Đơn tại quầy hoàn tất ngay; đơn online bắt đầu ở "new" và đi qua luồng fulfillment thủ công.
+    coalesce(v_order->>'status', case when v_order->>'channel' = 'online' then 'new' else 'completed' end),
     coalesce(v_order->>'payment_method', 'cash'),
     coalesce((v_order->>'subtotal')::numeric, 0),
     coalesce((v_order->>'discount')::numeric, 0),
     coalesce((v_order->>'total')::numeric, 0),
     coalesce((v_order->>'shipping_fee')::numeric, 0),
+    v_customer_id,
+    v_customer_name,
+    v_customer_phone,
+    v_customer_address,
+    v_customer_note,
     v_order->>'note',
     coalesce((v_order->>'created_offline')::boolean, false),
     auth.uid()
@@ -233,6 +347,58 @@ end;
 $$;
 
 -- ============================================
+-- RPC: update_order_status
+-- Đổi trạng thái đơn hàng. 'returned'/'cancelled' tự động hoàn lại tồn kho (ghi ledger reason
+-- 'return'); 'returned'/'cancelled'/'lost' là trạng thái cuối — khóa, không cho đổi tiếp.
+-- 'lost' không hoàn kho (hàng thất lạc, không quay lại cửa hàng).
+-- ============================================
+create or replace function update_order_status(p_order_id uuid, p_new_status text)
+returns jsonb
+language plpgsql
+as $$
+declare
+  v_current_status text;
+  v_item record;
+begin
+  select status into v_current_status from orders where id = p_order_id for update;
+
+  if v_current_status is null then
+    raise exception 'Không tìm thấy đơn hàng';
+  end if;
+
+  if v_current_status in ('cancelled', 'returned', 'lost') then
+    raise exception 'Đơn đã ở trạng thái cuối (%), không thể chỉnh sửa thêm', v_current_status;
+  end if;
+
+  if p_new_status not in ('new', 'shipping', 'completed', 'returned', 'cancelled', 'lost') then
+    raise exception 'Trạng thái không hợp lệ: %', p_new_status;
+  end if;
+
+  update orders set status = p_new_status where id = p_order_id;
+
+  if p_new_status in ('returned', 'cancelled') then
+    for v_item in
+      select product_id, qty from order_items where order_id = p_order_id and product_id is not null
+    loop
+      update products set stock_qty = stock_qty + v_item.qty where id = v_item.product_id;
+
+      insert into stock_movements (product_id, qty_change, reason, order_id, note, created_by)
+      values (
+        v_item.product_id,
+        v_item.qty,
+        'return',
+        p_order_id,
+        case when p_new_status = 'returned' then 'Hoàn kho do đơn chuyển hoàn' else 'Hoàn kho do đơn bị hủy' end,
+        auth.uid()
+      );
+    end loop;
+  end if;
+
+  return jsonb_build_object('order_id', p_order_id, 'status', p_new_status);
+end;
+$$;
+
+-- ============================================
 -- ROW LEVEL SECURITY
 -- v1: 1 cửa hàng, mọi user đã đăng nhập đọc/ghi toàn bộ dữ liệu.
 -- Mở rộng multi-tenant sau này bằng cột store_id nếu cần.
@@ -242,12 +408,16 @@ alter table orders enable row level security;
 alter table order_items enable row level security;
 alter table stock_movements enable row level security;
 alter table categories enable row level security;
+alter table customers enable row level security;
 
 drop policy if exists "authenticated_all_products" on products;
 create policy "authenticated_all_products" on products for all to authenticated using (true) with check (true);
 
 drop policy if exists "authenticated_all_categories" on categories;
 create policy "authenticated_all_categories" on categories for all to authenticated using (true) with check (true);
+
+drop policy if exists "authenticated_all_customers" on customers;
+create policy "authenticated_all_customers" on customers for all to authenticated using (true) with check (true);
 
 drop policy if exists "authenticated_all_orders" on orders;
 create policy "authenticated_all_orders" on orders for all to authenticated using (true) with check (true);
@@ -274,5 +444,8 @@ begin
   end if;
   if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'categories') then
     alter publication supabase_realtime add table categories;
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = 'customers') then
+    alter publication supabase_realtime add table customers;
   end if;
 end $$;

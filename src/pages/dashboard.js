@@ -17,7 +17,7 @@ export async function renderDashboard(container) {
     supabase
       .from('orders')
       .select('id, total, discount, shipping_fee, status, sync_status, created_at, order_items(qty, unit_price, unit_cost, product_name)')
-      .eq('status', 'completed')
+      .in('status', ['completed', 'returned', 'lost'])
       .gte('created_at', monthStart.toISOString()),
     supabase
       .from('products')
@@ -50,7 +50,7 @@ export async function renderDashboard(container) {
 
   const conflictCount = monthOrders.filter((o) => o.sync_status === 'conflict').length;
   const pendingCount = pendingLocal.length;
-  const topProducts = computeTopProducts(monthOrders).slice(0, 5);
+  const topProducts = computeTopProducts(monthOrders.filter((o) => o.status === 'completed')).slice(0, 5);
 
   container.innerHTML = `
     <h2 class="page-title">Tổng quan</h2>
@@ -102,15 +102,26 @@ export async function renderDashboard(container) {
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
+// Chỉ đơn 'completed' đóng góp doanh thu/giá vốn thật. Đơn 'returned' không có doanh thu
+// (hàng đã trả lại) nhưng vẫn mất phí vận chuyển -> lỗ đúng bằng phí ship. Đơn 'lost' mất cả
+// giá vốn hàng (không quay lại kho) lẫn phí vận chuyển. Đơn new/shipping/cancelled không được
+// truyền vào đây (đã lọc ở query .in('status', ...)).
 function computeStats(orders) {
   let revenue = 0;
   let cogs = 0;
   let shipping = 0;
   for (const o of orders) {
-    revenue += Number(o.total);
-    shipping += Number(o.shipping_fee) || 0;
-    for (const item of o.order_items || []) {
-      cogs += Number(item.qty) * Number(item.unit_cost);
+    const shippingFee = Number(o.shipping_fee) || 0;
+    const itemsCogs = (o.order_items || []).reduce((s, item) => s + Number(item.qty) * Number(item.unit_cost), 0);
+    if (o.status === 'completed') {
+      revenue += Number(o.total);
+      shipping += shippingFee;
+      cogs += itemsCogs;
+    } else if (o.status === 'returned') {
+      shipping += shippingFee;
+    } else if (o.status === 'lost') {
+      shipping += shippingFee;
+      cogs += itemsCogs;
     }
   }
   return { revenue, profit: revenue - cogs - shipping };

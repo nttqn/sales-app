@@ -27,8 +27,8 @@ async function loadOrders() {
   const start = rangeStart();
   const { data, error } = await supabase
     .from('orders')
-    .select('id, total, discount, subtotal, shipping_fee, created_at, order_items(qty, unit_price, unit_cost, product_name)')
-    .eq('status', 'completed')
+    .select('id, total, discount, subtotal, shipping_fee, status, created_at, order_items(qty, unit_price, unit_cost, product_name)')
+    .in('status', ['completed', 'returned', 'lost'])
     .gte('created_at', start.toISOString())
     .order('created_at', { ascending: true });
 
@@ -55,14 +55,26 @@ function bucketKey(date) {
   return state.period === 'daily' ? dayKey(date) : monthKey(date);
 }
 
+// Chỉ đơn 'completed' đóng góp doanh thu/giá vốn. Đơn 'returned' không có doanh thu (hàng đã
+// trả lại) nhưng vẫn mất phí vận chuyển -> lỗ đúng bằng phí ship. Đơn 'lost' mất cả giá vốn
+// hàng (không quay lại kho) lẫn phí vận chuyển.
 function computeSeries() {
   const map = new Map();
   for (const o of state.orders) {
     const key = bucketKey(o.created_at);
     const cur = map.get(key) || { revenue: 0, cogs: 0, shipping: 0 };
-    cur.revenue += Number(o.total);
-    cur.shipping += Number(o.shipping_fee) || 0;
-    for (const it of o.order_items || []) cur.cogs += Number(it.qty) * Number(it.unit_cost);
+    const shippingFee = Number(o.shipping_fee) || 0;
+    const itemsCogs = (o.order_items || []).reduce((s, it) => s + Number(it.qty) * Number(it.unit_cost), 0);
+    if (o.status === 'completed') {
+      cur.revenue += Number(o.total);
+      cur.shipping += shippingFee;
+      cur.cogs += itemsCogs;
+    } else if (o.status === 'returned') {
+      cur.shipping += shippingFee;
+    } else if (o.status === 'lost') {
+      cur.shipping += shippingFee;
+      cur.cogs += itemsCogs;
+    }
     map.set(key, cur);
   }
 
@@ -88,6 +100,7 @@ function computeSeries() {
 function computeTopProducts() {
   const map = new Map();
   for (const o of state.orders) {
+    if (o.status !== 'completed') continue; // hàng trả lại không tính là bán chạy
     for (const it of o.order_items || []) {
       const cur = map.get(it.product_name) || { name: it.product_name, qty: 0, revenue: 0, cogs: 0 };
       cur.qty += Number(it.qty);
@@ -100,12 +113,23 @@ function computeTopProducts() {
 }
 
 function computeTotals() {
-  const revenue = state.orders.reduce((s, o) => s + Number(o.total), 0);
-  const cogs = state.orders.reduce(
-    (s, o) => s + (o.order_items || []).reduce((s2, it) => s2 + Number(it.qty) * Number(it.unit_cost), 0),
-    0
-  );
-  const shipping = state.orders.reduce((s, o) => s + (Number(o.shipping_fee) || 0), 0);
+  let revenue = 0;
+  let cogs = 0;
+  let shipping = 0;
+  for (const o of state.orders) {
+    const shippingFee = Number(o.shipping_fee) || 0;
+    const itemsCogs = (o.order_items || []).reduce((s, it) => s + Number(it.qty) * Number(it.unit_cost), 0);
+    if (o.status === 'completed') {
+      revenue += Number(o.total);
+      shipping += shippingFee;
+      cogs += itemsCogs;
+    } else if (o.status === 'returned') {
+      shipping += shippingFee;
+    } else if (o.status === 'lost') {
+      shipping += shippingFee;
+      cogs += itemsCogs;
+    }
+  }
   return { revenue, cogs, shipping, profit: revenue - cogs - shipping };
 }
 

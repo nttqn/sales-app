@@ -788,6 +788,41 @@ input[type="date"], input[type="month"] { color-scheme: dark; }
 
 .btn-block { margin-top: 4px; }
 
+.pos-customer-label { font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); }
+.required-mark { color: var(--color-danger); }
+.optional-mark { color: var(--text-muted); font-weight: 500; }
+
+.pos-customer-field { margin-top: 8px; }
+.pos-customer-field .form-input { width: 100%; padding: 10px 14px; font-size: 0.85rem; }
+
+.customer-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.customer-suggestion-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.customer-suggestion-item:last-child { border-bottom: none; }
+.customer-suggestion-item:hover { background: var(--bg-card-hover); }
+.customer-suggestion-name { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+.customer-suggestion-phone { font-size: 0.78rem; color: var(--text-muted); flex-shrink: 0; }
+
 /* Desktop: products + cart side by side */
 @media (min-width: 900px) {
   .pos-layout { flex-direction: row; align-items: flex-start; }
@@ -825,6 +860,21 @@ input[type="date"], input[type="month"] { color-scheme: dark; }
 }
 .badge-success { color: var(--color-success); background: rgba(34, 197, 94, 0.12); }
 .badge-warning { color: var(--color-warning); background: rgba(234, 179, 8, 0.12); }
+
+.status-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.status-new { color: #60a5fa; background: rgba(59, 130, 246, 0.12); }
+.status-shipping { color: #a78bfa; background: rgba(139, 92, 246, 0.12); }
+.status-completed { color: var(--color-success); background: rgba(34, 197, 94, 0.12); }
+.status-returned { color: #fb923c; background: rgba(249, 115, 22, 0.12); }
+.status-cancelled { color: var(--text-muted); background: rgba(255, 255, 255, 0.06); }
+.status-lost { color: #fb7185; background: rgba(244, 63, 94, 0.12); }
 
 .chart-wrap { position: relative; height: 260px; width: 100%; }
 

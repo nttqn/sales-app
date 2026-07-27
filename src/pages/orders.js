@@ -1,10 +1,23 @@
 import { supabase } from '../lib/supabase.js';
-import { formatCurrency } from '../lib/ui.js';
+import { showToast, formatCurrency } from '../lib/ui.js';
+
+const STATUS_LABELS = {
+  new: 'Đơn mới',
+  shipping: 'Đang vận chuyển',
+  completed: 'Hoàn thành',
+  returned: 'Chuyển hoàn',
+  cancelled: 'Đã hủy',
+  lost: 'Thất lạc/mất hàng',
+};
+const STATUS_ORDER = ['new', 'shipping', 'completed', 'returned', 'cancelled', 'lost'];
+// Trạng thái cuối — không cho chỉnh sửa thêm (khớp với ràng buộc trong RPC update_order_status).
+const LOCKED_STATUSES = ['returned', 'cancelled', 'lost'];
 
 const state = {
   orders: [],
   channelFilter: 'all', // all | in_store | online
   syncFilter: 'all', // all | synced | conflict
+  statusFilter: 'all', // all | new | shipping | completed | returned | cancelled
   realtimeChannel: null,
 };
 
@@ -39,6 +52,7 @@ function getFiltered() {
   return state.orders.filter((o) => {
     if (state.channelFilter !== 'all' && o.channel !== state.channelFilter) return false;
     if (state.syncFilter !== 'all' && o.sync_status !== state.syncFilter) return false;
+    if (state.statusFilter !== 'all' && o.status !== state.statusFilter) return false;
     return true;
   });
 }
@@ -54,8 +68,12 @@ function paint(container) {
       <button class="chip ${state.channelFilter === 'in_store' ? 'active' : ''}" data-channel="in_store">Tại quầy</button>
       <button class="chip ${state.channelFilter === 'online' ? 'active' : ''}" data-channel="online">Online</button>
     </div>
+    <div class="filter-chips" style="margin-bottom: 8px;">
+      <button class="chip ${state.statusFilter === 'all' ? 'active' : ''}" data-status="all">Tất cả trạng thái đơn</button>
+      ${STATUS_ORDER.map((s) => `<button class="chip ${state.statusFilter === s ? 'active' : ''}" data-status="${s}">${STATUS_LABELS[s]}</button>`).join('')}
+    </div>
     <div class="filter-chips" style="margin-bottom: 16px;">
-      <button class="chip ${state.syncFilter === 'all' ? 'active' : ''}" data-sync="all">Tất cả trạng thái</button>
+      <button class="chip ${state.syncFilter === 'all' ? 'active' : ''}" data-sync="all">Tất cả đồng bộ</button>
       <button class="chip ${state.syncFilter === 'synced' ? 'active' : ''}" data-sync="synced">Đã đồng bộ</button>
       <button class="chip ${state.syncFilter === 'conflict' ? 'active' : ''}" data-sync="conflict">Cần đối soát</button>
     </div>
@@ -80,9 +98,13 @@ function emptyStateHtml() {
     </div>`;
 }
 
+function statusBadgeHtml(status) {
+  return `<span class="status-badge status-${status}">${STATUS_LABELS[status] || status}</span>`;
+}
+
 function orderRowHtml(o) {
   const channelLabel = o.channel === 'online' ? 'Online' : 'Tại quầy';
-  const statusBadge =
+  const syncBadge =
     o.sync_status === 'conflict'
       ? `<span class="badge-warning">Cần đối soát</span>`
       : `<span class="badge-success">Đã đồng bộ</span>`;
@@ -93,12 +115,26 @@ function orderRowHtml(o) {
         <div>
           <div class="product-name">${channelLabel} · ${paymentLabel(o.payment_method)}</div>
           <div class="product-sub">${new Date(o.created_at).toLocaleString('vi-VN')}${o.created_offline ? ' · Tạo lúc offline' : ''}</div>
+          ${o.customer_name ? `<div class="product-sub">Khách: ${escapeHtml(o.customer_name)}${o.customer_phone ? ' · ' + escapeHtml(o.customer_phone) : ''}</div>` : ''}
         </div>
         <div class="product-prices">
           <div class="product-sell">${formatCurrency(o.total)}</div>
-          <div style="margin-top:4px;">${statusBadge}</div>
+          <div style="margin-top:4px; display:flex; flex-direction:column; gap:4px; align-items:flex-end;">
+            ${statusBadgeHtml(o.status)}
+            ${syncBadge}
+          </div>
         </div>
       </div>
+      ${
+        o.status === 'new'
+          ? `<div class="product-row-footer">
+              <span></span>
+              <button type="button" class="btn-icon-text btn-mark-shipping" data-id="${o.id}">
+                <i data-lucide="truck"></i> Chuyển sang Đang vận chuyển
+              </button>
+            </div>`
+          : ''
+      }
     </div>`;
 }
 
@@ -115,14 +151,45 @@ function detailModalHtml() {
     </div>`;
 }
 
+function profitSectionHtml(order) {
+  const cogs = (order.order_items || []).reduce((s, it) => s + Number(it.qty) * Number(it.unit_cost), 0);
+  const shippingFee = Number(order.shipping_fee) || 0;
+
+  if (order.status === 'completed') {
+    const profit = Number(order.total) - cogs - shippingFee;
+    return `
+      <div class="pos-totals" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <div class="pos-total-row"><span>Giá vốn hàng bán</span><span>-${formatCurrency(cogs)}</span></div>
+        ${shippingFee > 0 ? `<div class="pos-total-row"><span>Phí vận chuyển</span><span>-${formatCurrency(shippingFee)}</span></div>` : ''}
+        <div class="pos-total-row pos-total-final"><span>Lợi nhuận thực tế</span><span>${formatCurrency(profit)}</span></div>
+      </div>`;
+  }
+
+  if (order.status === 'returned') {
+    return `
+      <div class="pos-totals" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <div class="pos-total-row"><span>Phí vận chuyển (mất do chuyển hoàn)</span><span>-${formatCurrency(shippingFee)}</span></div>
+        <div class="pos-total-row pos-total-final"><span>Lợi nhuận thực tế</span><span>${formatCurrency(-shippingFee)}</span></div>
+      </div>`;
+  }
+
+  if (order.status === 'lost') {
+    const loss = cogs + shippingFee;
+    return `
+      <div class="pos-totals" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+        <div class="pos-total-row"><span>Giá vốn hàng bán (thất lạc)</span><span>-${formatCurrency(cogs)}</span></div>
+        ${shippingFee > 0 ? `<div class="pos-total-row"><span>Phí vận chuyển</span><span>-${formatCurrency(shippingFee)}</span></div>` : ''}
+        <div class="pos-total-row pos-total-final"><span>Lợi nhuận thực tế</span><span>${formatCurrency(-loss)}</span></div>
+      </div>`;
+  }
+
+  return `<p class="empty-sub" style="margin-top:12px;">Lợi nhuận sẽ được tính khi đơn ở trạng thái Hoàn thành, Chuyển hoàn hoặc Thất lạc</p>`;
+}
+
 function openOrderDetail(container, order) {
   const modal = container.querySelector('#modal-order-detail');
   const body = container.querySelector('#order-detail-body');
   const channelLabel = order.channel === 'online' ? 'Online' : 'Tại quầy';
-
-  const cogs = (order.order_items || []).reduce((s, it) => s + Number(it.qty) * Number(it.unit_cost), 0);
-  const shippingFee = Number(order.shipping_fee) || 0;
-  const profit = Number(order.total) - cogs - shippingFee;
 
   const itemsHtml = (order.order_items || [])
     .slice()
@@ -139,25 +206,67 @@ function openOrderDetail(container, order) {
     )
     .join('');
 
+  const isLocked = LOCKED_STATUSES.includes(order.status);
+  const statusOptionsHtml = STATUS_ORDER.map(
+    (s) => `<option value="${s}" ${order.status === s ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`
+  ).join('');
+
   body.innerHTML = `
     <p class="form-label">${channelLabel} · ${paymentLabel(order.payment_method)} · ${new Date(order.created_at).toLocaleString('vi-VN')}</p>
     ${order.created_offline ? `<span class="badge-muted" style="margin-top:6px; display:inline-block;">Tạo lúc offline</span>` : ''}
+
+    <div class="form-section" style="margin-top:14px;">
+      <label class="form-label" for="order-status-select">Trạng thái đơn hàng</label>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <select id="order-status-select" class="form-input" style="flex:1;" ${isLocked ? 'disabled' : ''}>${statusOptionsHtml}</select>
+        <button type="button" id="btn-save-status" class="btn-primary" style="width:auto; padding:0 20px;" ${isLocked ? 'disabled' : ''}>Lưu</button>
+      </div>
+      ${isLocked ? `<p class="empty-sub" style="margin-top:6px;">Đơn đã ở trạng thái cuối, không thể chỉnh sửa thêm</p>` : ''}
+    </div>
+
+    ${
+      order.customer_name
+        ? `<div class="card" style="margin-top:14px; padding:14px;">
+            <div class="product-name">${escapeHtml(order.customer_name)}</div>
+            ${order.customer_phone ? `<div class="product-sub" style="margin-top:4px;">${escapeHtml(order.customer_phone)}</div>` : ''}
+            ${order.customer_address ? `<div class="product-sub" style="margin-top:2px;">${escapeHtml(order.customer_address)}</div>` : ''}
+            ${order.customer_note ? `<div class="product-sub" style="margin-top:6px;">Lưu ý: ${escapeHtml(order.customer_note)}</div>` : ''}
+          </div>`
+        : ''
+    }
     <div style="margin-top:16px;">${itemsHtml}</div>
     <div class="pos-totals" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
       <div class="pos-total-row"><span>Tạm tính</span><span>${formatCurrency(order.subtotal)}</span></div>
       <div class="pos-total-row"><span>Giảm giá</span><span>-${formatCurrency(order.discount)}</span></div>
       <div class="pos-total-row pos-total-final"><span>Tổng cộng</span><span>${formatCurrency(order.total)}</span></div>
     </div>
-    <div class="pos-totals" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
-      <div class="pos-total-row"><span>Giá vốn hàng bán</span><span>-${formatCurrency(cogs)}</span></div>
-      ${shippingFee > 0 ? `<div class="pos-total-row"><span>Phí vận chuyển</span><span>-${formatCurrency(shippingFee)}</span></div>` : ''}
-      <div class="pos-total-row pos-total-final"><span>Lợi nhuận thực tế</span><span>${formatCurrency(profit)}</span></div>
-    </div>
+    ${profitSectionHtml(order)}
     ${order.note ? `<p class="product-sub" style="margin-top:12px;">Ghi chú: ${escapeHtml(order.note)}</p>` : ''}
   `;
 
+  container.querySelector('#btn-save-status').addEventListener('click', () => {
+    const newStatus = container.querySelector('#order-status-select').value;
+    handleStatusUpdate(order.id, newStatus, container, `Đã cập nhật trạng thái: ${STATUS_LABELS[newStatus]}`);
+  });
+
   modal.classList.add('active');
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+async function handleStatusUpdate(orderId, newStatus, container, successMessage) {
+  try {
+    const { error } = await supabase.rpc('update_order_status', {
+      p_order_id: orderId,
+      p_new_status: newStatus,
+    });
+    if (error) throw error;
+    showToast(successMessage, 'success');
+    container.querySelector('#modal-order-detail')?.classList.remove('active');
+    await loadOrders();
+    paint(container);
+  } catch (err) {
+    showToast(err.message || 'Lỗi khi cập nhật trạng thái', 'error');
+  }
 }
 
 function paymentLabel(m) {
@@ -172,6 +281,13 @@ function wireEvents(container) {
     });
   });
 
+  container.querySelectorAll('[data-status]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      state.statusFilter = chip.dataset.status;
+      paint(container);
+    });
+  });
+
   container.querySelectorAll('[data-sync]').forEach((chip) => {
     chip.addEventListener('click', () => {
       state.syncFilter = chip.dataset.sync;
@@ -179,11 +295,18 @@ function wireEvents(container) {
     });
   });
 
-  container.querySelectorAll('.order-row').forEach((row) => {
-    row.addEventListener('click', () => {
+  container.querySelector('#order-list').addEventListener('click', (e) => {
+    const shipBtn = e.target.closest('.btn-mark-shipping');
+    if (shipBtn) {
+      handleStatusUpdate(shipBtn.dataset.id, 'shipping', container, 'Đã chuyển sang Đang vận chuyển');
+      return;
+    }
+
+    const row = e.target.closest('.order-row');
+    if (row) {
       const order = state.orders.find((o) => o.id === row.dataset.id);
       if (order) openOrderDetail(container, order);
-    });
+    }
   });
 
   const modal = container.querySelector('#modal-order-detail');

@@ -1,7 +1,7 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'SalesFlowDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const dbPromise = openDB(DB_NAME, DB_VERSION, {
   upgrade(db) {
@@ -15,6 +15,9 @@ const dbPromise = openDB(DB_NAME, DB_VERSION, {
     }
     if (!db.objectStoreNames.contains('meta')) {
       db.createObjectStore('meta');
+    }
+    if (!db.objectStoreNames.contains('customers')) {
+      db.createObjectStore('customers', { keyPath: 'id' });
     }
   },
 });
@@ -36,6 +39,20 @@ export async function upsertCachedProduct(product) {
 export async function getCachedProducts() {
   const db = await dbPromise;
   return db.getAll('products');
+}
+
+// --- Customers cache (for offline reads + POS autocomplete) ---
+export async function cacheCustomers(customers) {
+  const db = await dbPromise;
+  const tx = db.transaction('customers', 'readwrite');
+  await tx.store.clear();
+  for (const c of customers) await tx.store.put(c);
+  await tx.done;
+}
+
+export async function getCachedCustomers() {
+  const db = await dbPromise;
+  return db.getAll('customers');
 }
 
 // --- Pending orders queue (offline sales waiting to sync) ---
