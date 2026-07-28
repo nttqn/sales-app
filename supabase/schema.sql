@@ -346,13 +346,22 @@ begin
 end;
 $$;
 
+-- Xóa chữ ký cũ (2 tham số) trước khi tạo lại với tham số p_payment_method mới — PostgreSQL coi
+-- đây là 2 overload khác nhau (không tự "replace" chỉ vì có default), và PostgREST không nên có
+-- nhiều overload trùng tên cho cùng 1 RPC.
+drop function if exists update_order_status(uuid, text);
+
 -- ============================================
 -- RPC: update_order_status
--- Đổi trạng thái đơn hàng. 'returned'/'cancelled' tự động hoàn lại tồn kho (ghi ledger reason
--- 'return'); 'returned'/'cancelled'/'lost' là trạng thái cuối — khóa, không cho đổi tiếp.
--- 'lost' không hoàn kho (hàng thất lạc, không quay lại cửa hàng).
+-- Đổi trạng thái + (tùy chọn) hình thức thanh toán của đơn hàng.
+-- 'returned'/'cancelled' tự động hoàn lại tồn kho (ghi ledger reason 'return').
+-- 'completed'/'returned'/'cancelled'/'lost' là trạng thái cuối — khóa, không cho đổi status
+-- tiếp; nhưng hình thức thanh toán vẫn sửa được kể cả khi đơn đã ở trạng thái cuối (sửa lỗi
+-- nhập liệu không có tác dụng phụ nghiệp vụ nào). Chỉ áp dụng khóa/hoàn kho khi p_new_status
+-- thực sự khác trạng thái hiện tại, để gọi lại RPC chỉ để đổi thanh toán không bị chặn hay
+-- hoàn kho lặp lại.
 -- ============================================
-create or replace function update_order_status(p_order_id uuid, p_new_status text)
+create or replace function update_order_status(p_order_id uuid, p_new_status text, p_payment_method text default null)
 returns jsonb
 language plpgsql
 as $$
@@ -366,17 +375,26 @@ begin
     raise exception 'Không tìm thấy đơn hàng';
   end if;
 
-  if v_current_status in ('cancelled', 'returned', 'lost') then
-    raise exception 'Đơn đã ở trạng thái cuối (%), không thể chỉnh sửa thêm', v_current_status;
+  if p_payment_method is not null and p_payment_method not in ('cash', 'transfer', 'card') then
+    raise exception 'Hình thức thanh toán không hợp lệ: %', p_payment_method;
   end if;
 
-  if p_new_status not in ('new', 'shipping', 'completed', 'returned', 'cancelled', 'lost') then
-    raise exception 'Trạng thái không hợp lệ: %', p_new_status;
+  if p_new_status is distinct from v_current_status then
+    if v_current_status in ('completed', 'cancelled', 'returned', 'lost') then
+      raise exception 'Đơn đã ở trạng thái cuối (%), không thể chỉnh sửa thêm', v_current_status;
+    end if;
+
+    if p_new_status not in ('new', 'shipping', 'completed', 'returned', 'cancelled', 'lost') then
+      raise exception 'Trạng thái không hợp lệ: %', p_new_status;
+    end if;
   end if;
 
-  update orders set status = p_new_status where id = p_order_id;
+  update orders
+  set status = p_new_status,
+      payment_method = coalesce(p_payment_method, payment_method)
+  where id = p_order_id;
 
-  if p_new_status in ('returned', 'cancelled') then
+  if p_new_status in ('returned', 'cancelled') and p_new_status is distinct from v_current_status then
     for v_item in
       select product_id, qty from order_items where order_id = p_order_id and product_id is not null
     loop
@@ -394,7 +412,7 @@ begin
     end loop;
   end if;
 
-  return jsonb_build_object('order_id', p_order_id, 'status', p_new_status);
+  return jsonb_build_object('order_id', p_order_id, 'status', p_new_status, 'payment_method', p_payment_method);
 end;
 $$;
 

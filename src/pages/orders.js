@@ -10,14 +10,17 @@ const STATUS_LABELS = {
   lost: 'Thất lạc/mất hàng',
 };
 const STATUS_ORDER = ['new', 'shipping', 'completed', 'returned', 'cancelled', 'lost'];
-// Trạng thái cuối — không cho chỉnh sửa thêm (khớp với ràng buộc trong RPC update_order_status).
-const LOCKED_STATUSES = ['returned', 'cancelled', 'lost'];
+// Trạng thái cuối — không cho đổi status tiếp (khớp với ràng buộc trong RPC update_order_status).
+// Hình thức thanh toán vẫn sửa được kể cả khi đơn đã ở các trạng thái này.
+const LOCKED_STATUSES = ['completed', 'returned', 'cancelled', 'lost'];
+const PAYMENT_LABELS = { cash: 'Tiền mặt', transfer: 'Chuyển khoản', card: 'Thẻ' };
 
 const state = {
   orders: [],
   channelFilter: 'all', // all | in_store | online
   syncFilter: 'all', // all | synced | conflict
-  statusFilter: 'all', // all | new | shipping | completed | returned | cancelled
+  statusFilter: 'all', // all | new | shipping | completed | returned | cancelled | lost
+  paymentFilter: 'all', // all | cash | transfer | card
   realtimeChannel: null,
 };
 
@@ -53,6 +56,7 @@ function getFiltered() {
     if (state.channelFilter !== 'all' && o.channel !== state.channelFilter) return false;
     if (state.syncFilter !== 'all' && o.sync_status !== state.syncFilter) return false;
     if (state.statusFilter !== 'all' && o.status !== state.statusFilter) return false;
+    if (state.paymentFilter !== 'all' && o.payment_method !== state.paymentFilter) return false;
     return true;
   });
 }
@@ -71,6 +75,10 @@ function paint(container) {
     <div class="filter-chips" style="margin-bottom: 8px;">
       <button class="chip ${state.statusFilter === 'all' ? 'active' : ''}" data-status="all">Tất cả trạng thái đơn</button>
       ${STATUS_ORDER.map((s) => `<button class="chip ${state.statusFilter === s ? 'active' : ''}" data-status="${s}">${STATUS_LABELS[s]}</button>`).join('')}
+    </div>
+    <div class="filter-chips" style="margin-bottom: 8px;">
+      <button class="chip ${state.paymentFilter === 'all' ? 'active' : ''}" data-payment="all">Tất cả thanh toán</button>
+      ${Object.keys(PAYMENT_LABELS).map((p) => `<button class="chip ${state.paymentFilter === p ? 'active' : ''}" data-payment="${p}">${PAYMENT_LABELS[p]}</button>`).join('')}
     </div>
     <div class="filter-chips" style="margin-bottom: 16px;">
       <button class="chip ${state.syncFilter === 'all' ? 'active' : ''}" data-sync="all">Tất cả đồng bộ</button>
@@ -210,6 +218,9 @@ function openOrderDetail(container, order) {
   const statusOptionsHtml = STATUS_ORDER.map(
     (s) => `<option value="${s}" ${order.status === s ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`
   ).join('');
+  const paymentOptionsHtml = Object.keys(PAYMENT_LABELS)
+    .map((p) => `<option value="${p}" ${order.payment_method === p ? 'selected' : ''}>${PAYMENT_LABELS[p]}</option>`)
+    .join('');
 
   body.innerHTML = `
     <p class="form-label">${channelLabel} · ${paymentLabel(order.payment_method)} · ${new Date(order.created_at).toLocaleString('vi-VN')}</p>
@@ -217,12 +228,16 @@ function openOrderDetail(container, order) {
 
     <div class="form-section" style="margin-top:14px;">
       <label class="form-label" for="order-status-select">Trạng thái đơn hàng</label>
-      <div style="display:flex; gap:8px; margin-top:6px;">
-        <select id="order-status-select" class="form-input" style="flex:1;" ${isLocked ? 'disabled' : ''}>${statusOptionsHtml}</select>
-        <button type="button" id="btn-save-status" class="btn-primary" style="width:auto; padding:0 20px;" ${isLocked ? 'disabled' : ''}>Lưu</button>
-      </div>
-      ${isLocked ? `<p class="empty-sub" style="margin-top:6px;">Đơn đã ở trạng thái cuối, không thể chỉnh sửa thêm</p>` : ''}
+      <select id="order-status-select" class="form-input" style="margin-top:6px;" ${isLocked ? 'disabled' : ''}>${statusOptionsHtml}</select>
+      ${isLocked ? `<p class="empty-sub" style="margin-top:6px;">Đơn đã ở trạng thái cuối, không thể đổi trạng thái tiếp</p>` : ''}
     </div>
+
+    <div class="form-section" style="margin-top:12px;">
+      <label class="form-label" for="order-payment-select">Hình thức thanh toán</label>
+      <select id="order-payment-select" class="form-input" style="margin-top:6px;">${paymentOptionsHtml}</select>
+    </div>
+
+    <button type="button" id="btn-save-status" class="btn-primary" style="margin-top:12px;">Lưu thay đổi</button>
 
     ${
       order.customer_name
@@ -246,18 +261,20 @@ function openOrderDetail(container, order) {
 
   container.querySelector('#btn-save-status').addEventListener('click', () => {
     const newStatus = container.querySelector('#order-status-select').value;
-    handleStatusUpdate(order.id, newStatus, container, `Đã cập nhật trạng thái: ${STATUS_LABELS[newStatus]}`);
+    const newPayment = container.querySelector('#order-payment-select').value;
+    handleStatusUpdate(order.id, newStatus, newPayment, container, 'Đã lưu thay đổi đơn hàng');
   });
 
   modal.classList.add('active');
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
-async function handleStatusUpdate(orderId, newStatus, container, successMessage) {
+async function handleStatusUpdate(orderId, newStatus, paymentMethod, container, successMessage) {
   try {
     const { error } = await supabase.rpc('update_order_status', {
       p_order_id: orderId,
       p_new_status: newStatus,
+      p_payment_method: paymentMethod,
     });
     if (error) throw error;
     showToast(successMessage, 'success');
@@ -265,12 +282,12 @@ async function handleStatusUpdate(orderId, newStatus, container, successMessage)
     await loadOrders();
     paint(container);
   } catch (err) {
-    showToast(err.message || 'Lỗi khi cập nhật trạng thái', 'error');
+    showToast(err.message || 'Lỗi khi cập nhật đơn hàng', 'error');
   }
 }
 
 function paymentLabel(m) {
-  return { cash: 'Tiền mặt', transfer: 'Chuyển khoản', card: 'Thẻ' }[m] || m;
+  return PAYMENT_LABELS[m] || m;
 }
 
 function wireEvents(container) {
@@ -288,6 +305,13 @@ function wireEvents(container) {
     });
   });
 
+  container.querySelectorAll('[data-payment]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      state.paymentFilter = chip.dataset.payment;
+      paint(container);
+    });
+  });
+
   container.querySelectorAll('[data-sync]').forEach((chip) => {
     chip.addEventListener('click', () => {
       state.syncFilter = chip.dataset.sync;
@@ -298,7 +322,7 @@ function wireEvents(container) {
   container.querySelector('#order-list').addEventListener('click', (e) => {
     const shipBtn = e.target.closest('.btn-mark-shipping');
     if (shipBtn) {
-      handleStatusUpdate(shipBtn.dataset.id, 'shipping', container, 'Đã chuyển sang Đang vận chuyển');
+      handleStatusUpdate(shipBtn.dataset.id, 'shipping', null, container, 'Đã chuyển sang Đang vận chuyển');
       return;
     }
 
