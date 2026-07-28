@@ -25,6 +25,7 @@ const state = {
   realtimeChannel: null,
   customerRealtimeChannel: null,
   checkingOut: false,
+  eventsWired: false,
 };
 
 export async function renderPos(container) {
@@ -362,6 +363,12 @@ function renderTotals(container) {
 }
 
 function wireEvents(container) {
+  // #app-content là node cố định, không bị tạo lại mỗi lần vào trang Bán hàng (chỉ innerHTML
+  // đổi) -> nếu không chặn, mỗi lần renderPos() chạy lại sẽ cộng dồn thêm 1 bộ listener lên
+  // cùng node đó, khiến 1 click bị xử lý nhiều lần (số lượng giỏ hàng tự nhân đôi/ba/bốn...).
+  if (state.eventsWired) return;
+  state.eventsWired = true;
+
   container.addEventListener('input', (e) => {
     if (e.target.id === 'pos-search') {
       state.search = e.target.value;
