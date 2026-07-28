@@ -115,7 +115,7 @@ function orderRowHtml(o) {
         <div>
           <div class="product-name">${channelLabel} · ${paymentLabel(o.payment_method)}</div>
           <div class="product-sub">${new Date(o.created_at).toLocaleString('vi-VN')}${o.created_offline ? ' · Tạo lúc offline' : ''}</div>
-          ${o.customer_name ? `<div class="product-sub">Khách: ${escapeHtml(o.customer_name)}${o.customer_phone ? ' · ' + escapeHtml(o.customer_phone) : ''}</div>` : ''}
+          ${o.customer_name ? `<div class="order-customer-line">Khách: ${escapeHtml(o.customer_name)}${o.customer_phone ? ' · ' + escapeHtml(o.customer_phone) : ''}</div>` : ''}
         </div>
         <div class="product-prices">
           <div class="product-sell">${formatCurrency(o.total)}</div>
