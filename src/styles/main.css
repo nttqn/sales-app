@@ -822,7 +822,32 @@ input[type="date"], input[type="month"] { color-scheme: dark; }
 
 .pos-cart-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pos-cart-name { font-size: 0.85rem; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pos-cart-price { font-size: 0.75rem; color: var(--text-muted); }
+.pos-cart-price { font-size: 0.75rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
+
+.edit-price-btn {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.edit-price-btn svg { width: 11px; height: 11px; }
+.edit-price-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+
+.pos-cart-price-editing { gap: 6px; }
+.pos-price-input {
+  width: 90px;
+  padding: 4px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
 
 .pos-cart-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 

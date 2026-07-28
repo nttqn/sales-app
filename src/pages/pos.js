@@ -22,6 +22,7 @@ const state = {
   customers: [],
   customer: { name: '', phone: '', address: '', note: '' },
   customerSuggestions: [],
+  editingPriceIdx: null, // index của dòng giỏ hàng đang sửa giá bán (chỉ áp dụng cho đơn này)
   realtimeChannel: null,
   customerRealtimeChannel: null,
   checkingOut: false,
@@ -270,11 +271,24 @@ function totalsHtml() {
 }
 
 function cartRowHtml(item, idx) {
+  const isEditingPrice = state.editingPriceIdx === idx;
   return `
     <div class="pos-cart-row" data-idx="${idx}">
       <div class="pos-cart-row-main">
         <span class="pos-cart-name">${escapeHtml(item.product_name)}</span>
-        <span class="pos-cart-price">${formatCurrency(item.unit_price)} x ${item.qty}</span>
+        ${
+          isEditingPrice
+            ? `<span class="pos-cart-price pos-cart-price-editing">
+                <input type="number" class="pos-price-input" data-idx="${idx}" value="${item.unit_price}" min="0" step="1000">
+                <span>x ${item.qty}</span>
+              </span>`
+            : `<span class="pos-cart-price">
+                ${formatCurrency(item.unit_price)} x ${item.qty}
+                <button type="button" class="edit-price-btn" data-idx="${idx}" aria-label="Sửa giá bán">
+                  <i data-lucide="pencil"></i>
+                </button>
+              </span>`
+        }
       </div>
       <div class="pos-cart-row-actions">
         <button type="button" class="qty-btn" data-action="dec" data-idx="${idx}">−</button>
@@ -351,6 +365,14 @@ function renderCart(container) {
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
+function focusPriceInput(container) {
+  const input = container.querySelector('.pos-price-input');
+  if (input) {
+    input.focus();
+    input.select();
+  }
+}
+
 function renderTotals(container) {
   const el = container.querySelector('#pos-totals');
   const btn = container.querySelector('#pos-checkout');
@@ -389,6 +411,13 @@ function wireEvents(container) {
     if (e.target.id === 'pos-customer-name') state.customer.name = e.target.value;
     if (e.target.id === 'pos-customer-address') state.customer.address = e.target.value;
     if (e.target.id === 'pos-customer-note') state.customer.note = e.target.value;
+    if (e.target.classList.contains('pos-price-input')) {
+      const item = state.cart[Number(e.target.dataset.idx)];
+      if (item) {
+        item.unit_price = Number(e.target.value) || 0;
+        renderTotals(container);
+      }
+    }
   });
 
   container.addEventListener('change', (e) => {
@@ -405,12 +434,31 @@ function wireEvents(container) {
         renderCustomerSuggestions(container);
       }, 150);
     }
+    if (e.target.classList.contains('pos-price-input')) {
+      state.editingPriceIdx = null;
+      renderCart(container);
+    }
+  });
+
+  container.addEventListener('keydown', (e) => {
+    if (e.target.classList.contains('pos-price-input') && e.key === 'Enter') {
+      e.preventDefault();
+      e.target.blur();
+    }
   });
 
   container.addEventListener('click', (e) => {
     const copyBtn = e.target.closest('.copy-btn');
     if (copyBtn) {
       copyToClipboard(copyBtn.dataset.copy, copyBtn.dataset.copyLabel);
+      return;
+    }
+
+    const editPriceBtn = e.target.closest('.edit-price-btn');
+    if (editPriceBtn) {
+      state.editingPriceIdx = Number(editPriceBtn.dataset.idx);
+      renderCart(container);
+      focusPriceInput(container);
       return;
     }
 
@@ -438,6 +486,7 @@ function wireEvents(container) {
 
     if (e.target.closest('#pos-clear-cart')) {
       state.cart = [];
+      state.editingPriceIdx = null;
       renderCart(container);
       return;
     }
@@ -445,6 +494,8 @@ function wireEvents(container) {
     const qtyBtn = e.target.closest('.qty-btn');
     if (qtyBtn) {
       changeQty(Number(qtyBtn.dataset.idx), qtyBtn.dataset.action === 'inc' ? 1 : -1);
+      // changeQty() có thể xóa dòng khi số lượng về 0, làm dịch chỉ số các dòng sau.
+      state.editingPriceIdx = null;
       renderCart(container);
       return;
     }
@@ -452,6 +503,9 @@ function wireEvents(container) {
     const removeBtn = e.target.closest('.remove-cart-item');
     if (removeBtn) {
       state.cart.splice(Number(removeBtn.dataset.idx), 1);
+      // Bỏ chỉ số dòng đang sửa giá vì mảng giỏ hàng đã dịch lại sau khi xóa,
+      // tránh input giá bị lệch sang đúng dòng khác.
+      state.editingPriceIdx = null;
       renderCart(container);
       return;
     }
@@ -510,6 +564,7 @@ async function handleCheckout(container) {
   state.shippingFee = state.channel === 'online' ? DEFAULT_ONLINE_SHIPPING_FEE : 0;
   state.customer = { name: '', phone: '', address: '', note: '' };
   state.customerSuggestions = [];
+  state.editingPriceIdx = null;
   state.checkingOut = false;
   renderCart(container);
 
