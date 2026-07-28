@@ -34,6 +34,7 @@ import {
   Check,
   Users,
   Truck,
+  Copy,
 } from 'lucide';
 import { supabase } from './lib/supabase.js';
 
@@ -62,6 +63,7 @@ const usedIcons = {
   Check,
   Users,
   Truck,
+  Copy,
 };
 import { showToast } from './lib/ui.js';
 import { initSync, syncPendingOrders, onSyncStateChange } from './lib/sync.js';

@@ -705,6 +705,33 @@ input[type="date"], input[type="month"] { color-scheme: dark; }
 .pos-product-stock { font-size: 0.7rem; color: var(--text-muted); }
 .pos-product-stock.zero { color: var(--color-danger); }
 
+.pos-copyable-wrap { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+
+.copy-btn {
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  border-radius: 4px;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.copy-btn svg { width: 12px; height: 12px; }
+.copy-btn:hover { color: var(--text-primary); background: var(--bg-card-hover); }
+
+.pos-copyable-wrap:hover .copy-btn,
+.copy-btn:focus-visible {
+  opacity: 1;
+}
+
+/* Thiết bị cảm ứng không có hover thật -> luôn hiện nút copy để vẫn dùng được. */
+@media (hover: none) {
+  .copy-btn { opacity: 1; }
+}
+
 .pos-cart {
   background: var(--bg-card);
   border: 1px solid var(--border);

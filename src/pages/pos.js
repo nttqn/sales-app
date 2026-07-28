@@ -9,6 +9,8 @@ import {
 import { showToast, formatCurrency } from '../lib/ui.js';
 import { syncPendingOrders } from '../lib/sync.js';
 
+const DEFAULT_ONLINE_SHIPPING_FEE = 14000;
+
 const state = {
   products: [],
   search: '',
@@ -182,11 +184,21 @@ function productGridHtml() {
 function productCardHtml(p) {
   const outOfStock = Number(p.stock_qty) <= 0;
   return `
-    <button type="button" class="pos-product-card ${outOfStock ? 'out-of-stock' : ''}" data-id="${p.id}" ${outOfStock ? 'disabled' : ''}>
-      <span class="pos-product-name">${escapeHtml(p.name)}</span>
-      <span class="pos-product-price">${formatCurrency(p.sell_price)}</span>
+    <div class="pos-product-card ${outOfStock ? 'out-of-stock' : ''}" data-id="${p.id}" role="button" tabindex="0">
+      <span class="pos-copyable-wrap">
+        <span class="pos-product-name">${escapeHtml(p.name)}</span>
+        <button type="button" class="copy-btn" data-copy="${escapeAttr(p.name)}" data-copy-label="Đã sao chép tên sản phẩm" aria-label="Sao chép tên sản phẩm">
+          <i data-lucide="copy"></i>
+        </button>
+      </span>
+      <span class="pos-copyable-wrap">
+        <span class="pos-product-price">${formatCurrency(p.sell_price)}</span>
+        <button type="button" class="copy-btn" data-copy="${p.sell_price}" data-copy-label="Đã sao chép giá sản phẩm" aria-label="Sao chép giá sản phẩm">
+          <i data-lucide="copy"></i>
+        </button>
+      </span>
       <span class="pos-product-stock ${outOfStock ? 'zero' : ''}">Tồn: ${p.stock_qty}</span>
-    </button>`;
+    </div>`;
 }
 
 function cartBodyHtml() {
@@ -389,8 +401,14 @@ function wireEvents(container) {
   });
 
   container.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('.copy-btn');
+    if (copyBtn) {
+      copyToClipboard(copyBtn.dataset.copy, copyBtn.dataset.copyLabel);
+      return;
+    }
+
     const card = e.target.closest('.pos-product-card');
-    if (card && !card.disabled) {
+    if (card && !card.classList.contains('out-of-stock')) {
       addToCart(card.dataset.id);
       renderCart(container);
       return;
@@ -399,7 +417,7 @@ function wireEvents(container) {
     const channelBtn = e.target.closest('#pos-channel .chip');
     if (channelBtn) {
       state.channel = channelBtn.dataset.channel;
-      if (state.channel !== 'online') state.shippingFee = 0;
+      state.shippingFee = state.channel === 'online' ? DEFAULT_ONLINE_SHIPPING_FEE : 0;
       renderCart(container);
       return;
     }
@@ -482,7 +500,7 @@ async function handleCheckout(container) {
 
   state.cart = [];
   state.discount = 0;
-  state.shippingFee = 0;
+  state.shippingFee = state.channel === 'online' ? DEFAULT_ONLINE_SHIPPING_FEE : 0;
   state.customer = { name: '', phone: '', address: '', note: '' };
   state.customerSuggestions = [];
   state.checkingOut = false;
@@ -494,6 +512,15 @@ async function handleCheckout(container) {
   );
 
   if (navigator.onLine) syncPendingOrders({ silent: true });
+}
+
+async function copyToClipboard(text, label) {
+  try {
+    await navigator.clipboard.writeText(String(text));
+    showToast(label || 'Đã sao chép', 'success');
+  } catch (err) {
+    showToast('Không thể sao chép', 'error');
+  }
 }
 
 function escapeHtml(str) {
