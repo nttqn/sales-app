@@ -4,7 +4,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig({
   plugins: [
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
+      injectRegister: false, // đăng ký thủ công qua virtual:pwa-register trong main.js để hiện banner cập nhật
       includeAssets: ['favicon.svg', 'icons/*.png'],
       manifest: {
         name: 'SalesFlow - Quản lý bán hàng',

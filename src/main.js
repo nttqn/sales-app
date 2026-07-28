@@ -1,4 +1,5 @@
 import './styles/main.css';
+import { registerSW } from 'virtual:pwa-register';
 import {
   Chart,
   LineController,
@@ -78,6 +79,18 @@ import { renderCustomers } from './pages/customers.js';
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip, Filler);
 window.Chart = Chart;
 window.lucide = { createIcons: () => createIcons({ icons: usedIcons }) };
+
+// Service worker mới chỉ chờ sẵn (registerType: 'prompt', không tự skipWaiting) cho tới khi
+// người dùng bấm "Tải lại" ở banner — tránh SW cũ/mới lẫn lộn giữa chừng phiên đang mở.
+const updateSW = registerSW({
+  onNeedRefresh() {
+    document.getElementById('update-banner')?.classList.add('show');
+  },
+});
+
+document.getElementById('btn-reload-update')?.addEventListener('click', () => {
+  updateSW(true);
+});
 
 const appContentEl = document.getElementById('app-content');
 const shellEls = {
