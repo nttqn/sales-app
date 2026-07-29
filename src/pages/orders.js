@@ -17,6 +17,7 @@ const PAYMENT_LABELS = { cash: 'Tiền mặt', transfer: 'Chuyển khoản', car
 
 const state = {
   orders: [],
+  search: '',
   channelFilter: 'all', // all | in_store | online
   syncFilter: 'all', // all | synced | conflict
   statusFilter: 'all', // all | new | shipping | completed | returned | cancelled | lost
@@ -52,11 +53,17 @@ function subscribeRealtime(container) {
 }
 
 function getFiltered() {
+  const q = state.search.trim().toLowerCase();
   return state.orders.filter((o) => {
     if (state.channelFilter !== 'all' && o.channel !== state.channelFilter) return false;
     if (state.syncFilter !== 'all' && o.sync_status !== state.syncFilter) return false;
     if (state.statusFilter !== 'all' && o.status !== state.statusFilter) return false;
     if (state.paymentFilter !== 'all' && o.payment_method !== state.paymentFilter) return false;
+    if (q) {
+      const name = (o.customer_name || '').toLowerCase();
+      const phone = o.customer_phone || '';
+      if (!name.includes(q) && !phone.includes(q)) return false;
+    }
     return true;
   });
 }
@@ -67,7 +74,11 @@ function paint(container) {
   container.innerHTML = `
     <h2 class="page-title">Đơn hàng</h2>
 
-    <div class="filter-chips" style="margin-bottom: 8px;">
+    <div class="search-bar-wrap">
+      <input type="text" id="order-search" class="form-input" placeholder="Tìm theo tên hoặc SĐT khách hàng..." value="${escapeAttr(state.search)}">
+    </div>
+
+    <div class="filter-chips" style="margin: 12px 0 8px;">
       <button class="chip ${state.channelFilter === 'all' ? 'active' : ''}" data-channel="all">Tất cả kênh</button>
       <button class="chip ${state.channelFilter === 'in_store' ? 'active' : ''}" data-channel="in_store">Tại quầy</button>
       <button class="chip ${state.channelFilter === 'online' ? 'active' : ''}" data-channel="online">Online</button>
@@ -94,6 +105,14 @@ function paint(container) {
   `;
 
   wireEvents(container);
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function renderOrderList(container) {
+  const el = container.querySelector('#order-list');
+  if (!el) return;
+  const list = getFiltered();
+  el.innerHTML = list.length ? list.map(orderRowHtml).join('') : emptyStateHtml();
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
@@ -291,6 +310,11 @@ function paymentLabel(m) {
 }
 
 function wireEvents(container) {
+  container.querySelector('#order-search').addEventListener('input', (e) => {
+    state.search = e.target.value;
+    renderOrderList(container);
+  });
+
   container.querySelectorAll('[data-channel]').forEach((chip) => {
     chip.addEventListener('click', () => {
       state.channelFilter = chip.dataset.channel;
@@ -342,4 +366,7 @@ function wireEvents(container) {
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function escapeAttr(str) {
+  return escapeHtml(str);
 }
