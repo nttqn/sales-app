@@ -14,6 +14,18 @@ const STATUS_ORDER = ['new', 'shipping', 'completed', 'returned', 'cancelled', '
 // Hình thức thanh toán vẫn sửa được kể cả khi đơn đã ở các trạng thái này.
 const LOCKED_STATUSES = ['completed', 'returned', 'cancelled', 'lost'];
 const PAYMENT_LABELS = { cash: 'Tiền mặt', transfer: 'Chuyển khoản', card: 'Thẻ' };
+const DATE_FILTER_LABELS = {
+  all: 'Tất cả thời gian',
+  today: 'Hôm nay',
+  yesterday: 'Hôm qua',
+  last_7_days: '7 ngày qua',
+  this_week: 'Tuần này',
+  last_week: 'Tuần trước',
+  this_month: 'Tháng này',
+  last_month: 'Tháng trước',
+  custom: 'Tùy chỉnh',
+};
+const DATE_FILTER_ORDER = ['all', 'today', 'yesterday', 'last_7_days', 'this_week', 'last_week', 'this_month', 'last_month', 'custom'];
 
 const state = {
   orders: [],
@@ -22,6 +34,9 @@ const state = {
   syncFilter: 'all', // all | synced | conflict
   statusFilter: 'all', // all | new | shipping | completed | returned | cancelled | lost
   paymentFilter: 'all', // all | cash | transfer | card
+  dateFilter: 'all', // all | today | yesterday | last_7_days | this_week | last_week | this_month | last_month | custom
+  customFrom: '',
+  customTo: '',
   realtimeChannel: null,
 };
 
@@ -31,13 +46,82 @@ export async function renderOrders(container) {
   subscribeRealtime(container);
 }
 
-async function loadOrders() {
-  const { data, error } = await supabase
-    .from('orders')
-    .select('*, order_items(*)')
-    .order('created_at', { ascending: false })
-    .limit(100);
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+function addDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+function mondayOf(d) {
+  const x = startOfDay(d);
+  const day = x.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  return addDays(x, diff);
+}
 
+// Trả về { start, end } (end không bao gồm) theo state.dateFilter, hoặc null nếu không lọc theo thời gian.
+// Lọc thời gian được đẩy xuống query Supabase (không lọc client-side) vì loadOrders() chỉ tải tối đa
+// 100 đơn gần nhất khi không có bộ lọc — nếu lọc client-side, các khoảng thời gian xa (vd "Tháng trước")
+// có thể bị thiếu đơn do chúng đã nằm ngoài 100 đơn đã tải.
+function getDateRange() {
+  const now = new Date();
+  switch (state.dateFilter) {
+    case 'today': {
+      const start = startOfDay(now);
+      return { start, end: addDays(start, 1) };
+    }
+    case 'yesterday': {
+      const start = addDays(startOfDay(now), -1);
+      return { start, end: addDays(start, 1) };
+    }
+    case 'last_7_days': {
+      const start = addDays(startOfDay(now), -6);
+      return { start, end: addDays(startOfDay(now), 1) };
+    }
+    case 'this_week': {
+      const start = mondayOf(now);
+      return { start, end: addDays(start, 7) };
+    }
+    case 'last_week': {
+      const start = addDays(mondayOf(now), -7);
+      return { start, end: mondayOf(now) };
+    }
+    case 'this_month': {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      return { start, end };
+    }
+    case 'last_month': {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start, end };
+    }
+    case 'custom': {
+      if (!state.customFrom || !state.customTo) return null;
+      const start = startOfDay(new Date(`${state.customFrom}T00:00:00`));
+      const end = addDays(startOfDay(new Date(`${state.customTo}T00:00:00`)), 1);
+      return { start, end };
+    }
+    default:
+      return null;
+  }
+}
+
+async function loadOrders() {
+  const range = getDateRange();
+  let query = supabase.from('orders').select('*, order_items(*)').order('created_at', { ascending: false });
+
+  if (range) {
+    query = query.gte('created_at', range.start.toISOString()).lt('created_at', range.end.toISOString()).limit(1000);
+  } else {
+    query = query.limit(100);
+  }
+
+  const { data, error } = await query;
   if (!error) state.orders = data;
 }
 
@@ -91,11 +175,15 @@ function paint(container) {
       <button class="chip ${state.paymentFilter === 'all' ? 'active' : ''}" data-payment="all">Tất cả thanh toán</button>
       ${Object.keys(PAYMENT_LABELS).map((p) => `<button class="chip ${state.paymentFilter === p ? 'active' : ''}" data-payment="${p}">${PAYMENT_LABELS[p]}</button>`).join('')}
     </div>
-    <div class="filter-chips" style="margin-bottom: 16px;">
+    <div class="filter-chips" style="margin-bottom: 8px;">
       <button class="chip ${state.syncFilter === 'all' ? 'active' : ''}" data-sync="all">Tất cả đồng bộ</button>
       <button class="chip ${state.syncFilter === 'synced' ? 'active' : ''}" data-sync="synced">Đã đồng bộ</button>
       <button class="chip ${state.syncFilter === 'conflict' ? 'active' : ''}" data-sync="conflict">Cần đối soát</button>
     </div>
+    <div class="filter-chips" style="margin-bottom: 8px;">
+      ${DATE_FILTER_ORDER.map((d) => `<button class="chip ${state.dateFilter === d ? 'active' : ''}" data-date="${d}">${DATE_FILTER_LABELS[d]}</button>`).join('')}
+    </div>
+    ${state.dateFilter === 'custom' ? customDateRangeHtml() : ''}
 
     <div id="order-list">
       ${list.length ? list.map(orderRowHtml).join('') : emptyStateHtml()}
@@ -114,6 +202,16 @@ function renderOrderList(container) {
   const list = getFiltered();
   el.innerHTML = list.length ? list.map(orderRowHtml).join('') : emptyStateHtml();
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function customDateRangeHtml() {
+  return `
+    <div class="custom-date-range" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:16px;">
+      <input type="date" id="date-from" class="form-input" style="max-width:160px;" value="${escapeAttr(state.customFrom)}">
+      <span class="empty-sub">đến</span>
+      <input type="date" id="date-to" class="form-input" style="max-width:160px;" value="${escapeAttr(state.customTo)}">
+      <button type="button" id="btn-apply-custom-date" class="btn-secondary">Áp dụng</button>
+    </div>`;
 }
 
 function emptyStateHtml() {
@@ -342,6 +440,32 @@ function wireEvents(container) {
       paint(container);
     });
   });
+
+  container.querySelectorAll('[data-date]').forEach((chip) => {
+    chip.addEventListener('click', async () => {
+      state.dateFilter = chip.dataset.date;
+      if (state.dateFilter !== 'custom') {
+        await loadOrders();
+      }
+      paint(container);
+    });
+  });
+
+  const applyDateBtn = container.querySelector('#btn-apply-custom-date');
+  if (applyDateBtn) {
+    applyDateBtn.addEventListener('click', async () => {
+      const from = container.querySelector('#date-from').value;
+      const to = container.querySelector('#date-to').value;
+      if (!from || !to) {
+        showToast('Vui lòng chọn đầy đủ ngày bắt đầu và kết thúc', 'error');
+        return;
+      }
+      state.customFrom = from;
+      state.customTo = to;
+      await loadOrders();
+      paint(container);
+    });
+  }
 
   container.querySelector('#order-list').addEventListener('click', (e) => {
     const shipBtn = e.target.closest('.btn-mark-shipping');
