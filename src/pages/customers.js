@@ -72,6 +72,14 @@ function paint(container) {
   refreshIcons();
 }
 
+function renderCustomerList(container) {
+  const el = container.querySelector('#customer-list');
+  if (!el) return;
+  const list = getFilteredCustomers();
+  el.innerHTML = list.length === 0 ? emptyStateHtml() : list.map(customerRowHtml).join('');
+  refreshIcons();
+}
+
 function emptyStateHtml() {
   return `
     <div class="empty-state">
@@ -143,18 +151,23 @@ function wireEvents(container) {
 
   container.querySelector('#customer-search').addEventListener('input', (e) => {
     state.search = e.target.value;
-    paint(container);
+    renderCustomerList(container);
   });
 
-  container.querySelectorAll('.btn-edit-customer').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const customer = state.customers.find((c) => c.id === btn.dataset.id);
+  // Delegated trên #customer-list (thay vì gắn từng nút) vì renderCustomerList() chỉ thay
+  // innerHTML của nó khi gõ tìm kiếm — gắn trực tiếp lên từng nút sẽ mất tác dụng sau lần gõ đầu.
+  container.querySelector('#customer-list').addEventListener('click', (e) => {
+    const editBtn = e.target.closest('.btn-edit-customer');
+    if (editBtn) {
+      const customer = state.customers.find((c) => c.id === editBtn.dataset.id);
       openCustomerModal(container, customer);
-    });
-  });
+      return;
+    }
 
-  container.querySelectorAll('.btn-delete-customer').forEach((btn) => {
-    btn.addEventListener('click', () => handleCustomerDelete(btn.dataset.id, container));
+    const deleteBtn = e.target.closest('.btn-delete-customer');
+    if (deleteBtn) {
+      handleCustomerDelete(deleteBtn.dataset.id, container);
+    }
   });
 
   const modal = container.querySelector('#modal-customer');

@@ -126,6 +126,14 @@ function paint(container) {
   refreshIcons();
 }
 
+function renderProductList(container) {
+  const el = container.querySelector('#product-list');
+  if (!el) return;
+  const list = getFilteredProducts();
+  el.innerHTML = list.length === 0 ? emptyStateHtml() : list.map(productRowHtml).join('');
+  refreshIcons();
+}
+
 function emptyStateHtml() {
   return `
     <div class="empty-state">
@@ -336,7 +344,7 @@ function wireEvents(container) {
 
   container.querySelector('#product-search').addEventListener('input', (e) => {
     state.search = e.target.value;
-    paint(container);
+    renderProductList(container);
   });
 
   container.querySelectorAll('.filter-chips [data-filter]').forEach((chip) => {
@@ -353,25 +361,28 @@ function wireEvents(container) {
     });
   });
 
-  container.querySelectorAll('.btn-edit-product').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const product = state.products.find((p) => p.id === btn.dataset.id);
+  // Delegated trên #product-list (thay vì gắn từng nút) vì renderProductList() chỉ thay
+  // innerHTML của nó khi gõ tìm kiếm — gắn trực tiếp lên từng nút sẽ mất tác dụng sau lần gõ đầu.
+  container.querySelector('#product-list').addEventListener('click', (e) => {
+    const editBtn = e.target.closest('.btn-edit-product');
+    if (editBtn) {
+      const product = state.products.find((p) => p.id === editBtn.dataset.id);
       openProductModal(container, product);
-    });
-  });
+      return;
+    }
 
-  container.querySelectorAll('.btn-adjust-stock').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const product = state.products.find((p) => p.id === btn.dataset.id);
+    const adjustBtn = e.target.closest('.btn-adjust-stock');
+    if (adjustBtn) {
+      const product = state.products.find((p) => p.id === adjustBtn.dataset.id);
       openStockModal(container, product);
-    });
-  });
+      return;
+    }
 
-  container.querySelectorAll('.btn-history-product').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const product = state.products.find((p) => p.id === btn.dataset.id);
+    const historyBtn = e.target.closest('.btn-history-product');
+    if (historyBtn) {
+      const product = state.products.find((p) => p.id === historyBtn.dataset.id);
       openHistoryModal(container, product);
-    });
+    }
   });
 
   const historyModal = container.querySelector('#modal-history');
