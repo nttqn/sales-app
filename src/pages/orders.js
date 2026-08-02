@@ -238,9 +238,13 @@ function orderRowHtml(o) {
     <div class="card product-row order-row" data-id="${o.id}">
       <div class="product-row-main">
         <div>
-          <div class="product-name">${channelLabel} · ${paymentLabel(o.payment_method)}</div>
-          <div class="product-sub">${new Date(o.created_at).toLocaleString('vi-VN')}${o.created_offline ? ' · Tạo lúc offline' : ''}</div>
-          ${o.customer_name ? `<div class="order-customer-line">Khách: ${escapeHtml(o.customer_name)}${o.customer_phone ? ' · ' + escapeHtml(o.customer_phone) : ''}</div>` : ''}
+          ${
+            o.customer_name
+              ? `<div class="order-customer-line">${escapeHtml(o.customer_name)}${o.customer_phone ? ' · ' + escapeHtml(o.customer_phone) : ''}</div>
+                 <div class="order-meta-line">${channelLabel} · ${paymentLabel(o.payment_method)} · ${new Date(o.created_at).toLocaleString('vi-VN')}${o.created_offline ? ' · Tạo lúc offline' : ''}</div>`
+              : `<div class="product-name">${channelLabel} · ${paymentLabel(o.payment_method)}</div>
+                 <div class="product-sub">${new Date(o.created_at).toLocaleString('vi-VN')}${o.created_offline ? ' · Tạo lúc offline' : ''}</div>`
+          }
         </div>
         <div class="product-prices">
           <div class="product-sell">${formatCurrency(o.total)}</div>
