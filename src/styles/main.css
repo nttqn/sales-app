@@ -621,6 +621,7 @@ input[type="date"], input[type="month"] { color-scheme: dark; }
 
 .order-customer-line { font-size: 1.05rem; font-weight: 800; color: #fbbf24; letter-spacing: 0.01em; }
 .order-meta-line { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
+.order-items-line { font-size: 0.8rem; color: var(--text-secondary); margin-top: 6px; }
 
 .badge-muted {
   font-size: 0.65rem;

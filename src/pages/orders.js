@@ -227,6 +227,17 @@ function statusBadgeHtml(status) {
   return `<span class="status-badge status-${status}">${STATUS_LABELS[status] || status}</span>`;
 }
 
+function orderItemsLineHtml(o) {
+  const items = o.order_items || [];
+  if (!items.length) return '';
+  const text = items
+    .slice()
+    .sort((a, b) => a.product_name.localeCompare(b.product_name))
+    .map((it) => `${escapeHtml(it.product_name)}${Number(it.qty) > 1 ? ` x${it.qty}` : ''}`)
+    .join(', ');
+  return `<div class="order-items-line">${text}</div>`;
+}
+
 function orderRowHtml(o) {
   const channelLabel = o.channel === 'online' ? 'Online' : 'Tại quầy';
   const syncBadge =
@@ -245,6 +256,7 @@ function orderRowHtml(o) {
               : `<div class="product-name">${channelLabel} · ${paymentLabel(o.payment_method)}</div>
                  <div class="product-sub">${new Date(o.created_at).toLocaleString('vi-VN')}${o.created_offline ? ' · Tạo lúc offline' : ''}</div>`
           }
+          ${orderItemsLineHtml(o)}
         </div>
         <div class="product-prices">
           <div class="product-sell">${formatCurrency(o.total)}</div>
