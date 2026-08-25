@@ -284,7 +284,19 @@ function orderRowHtml(o) {
                 <i data-lucide="truck"></i> Chuyển sang Đang vận chuyển
               </button>
             </div>`
-          : ''
+          : o.status === 'shipping'
+            ? `<div class="product-row-footer">
+                <span></span>
+                <div style="display:flex; gap:8px;">
+                  <button type="button" class="btn-icon-text btn-quick-status btn-status-danger" data-id="${o.id}" data-status="returned" title="Chuyển hoàn">
+                    <i data-lucide="x"></i> Chuyển hoàn
+                  </button>
+                  <button type="button" class="btn-icon-text btn-quick-status btn-status-success" data-id="${o.id}" data-status="completed" title="Hoàn thành">
+                    <i data-lucide="check"></i> Hoàn thành
+                  </button>
+                </div>
+              </div>`
+            : ''
       }
     </div>`;
 }
@@ -513,6 +525,13 @@ function wireEvents(container) {
     const shipBtn = e.target.closest('.btn-mark-shipping');
     if (shipBtn) {
       handleStatusUpdate(shipBtn.dataset.id, 'shipping', null, container, 'Đã chuyển sang Đang vận chuyển');
+      return;
+    }
+
+    const quickStatusBtn = e.target.closest('.btn-quick-status');
+    if (quickStatusBtn) {
+      const newStatus = quickStatusBtn.dataset.status;
+      handleStatusUpdate(quickStatusBtn.dataset.id, newStatus, null, container, `Đã chuyển sang ${STATUS_LABELS[newStatus]}`);
       return;
     }
 
