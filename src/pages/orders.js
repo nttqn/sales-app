@@ -37,10 +37,6 @@ const state = {
   dateFilter: 'all', // all | today | yesterday | last_7_days | this_week | last_week | this_month | last_month | custom
   customFrom: '',
   customTo: '',
-  // id các đơn vừa đổi trạng thái bằng nút nhanh trong danh sách — được giữ hiển thị dù không còn
-  // khớp statusFilter nữa, để danh sách không tự "nhảy" mất đơn ngay dưới ngón tay khi thao tác liên tiếp.
-  // Bị xóa mỗi khi người dùng chủ động đổi bộ lọc.
-  stickyIds: new Set(),
   realtimeChannel: null,
 };
 
@@ -145,7 +141,7 @@ function getFiltered() {
   return state.orders.filter((o) => {
     if (state.channelFilter !== 'all' && o.channel !== state.channelFilter) return false;
     if (state.syncFilter !== 'all' && o.sync_status !== state.syncFilter) return false;
-    if (state.statusFilter !== 'all' && o.status !== state.statusFilter && !state.stickyIds.has(o.id)) return false;
+    if (state.statusFilter !== 'all' && o.status !== state.statusFilter) return false;
     if (state.paymentFilter !== 'all' && o.payment_method !== state.paymentFilter) return false;
     if (q) {
       const name = (o.customer_name || '').toLowerCase();
@@ -428,7 +424,7 @@ function openOrderDetail(container, order) {
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
-async function handleStatusUpdate(orderId, newStatus, paymentMethod, container, successMessage, keepVisible = false) {
+async function handleStatusUpdate(orderId, newStatus, paymentMethod, container, successMessage) {
   try {
     const { error } = await supabase.rpc('update_order_status', {
       p_order_id: orderId,
@@ -436,7 +432,6 @@ async function handleStatusUpdate(orderId, newStatus, paymentMethod, container, 
       p_payment_method: paymentMethod,
     });
     if (error) throw error;
-    if (keepVisible) state.stickyIds.add(orderId);
     showToast(successMessage, 'success');
     container.querySelector('#modal-order-detail')?.classList.remove('active');
     await loadOrders();
@@ -468,7 +463,6 @@ function wireEvents(container) {
   container.querySelectorAll('[data-channel]').forEach((chip) => {
     chip.addEventListener('click', () => {
       state.channelFilter = chip.dataset.channel;
-      state.stickyIds.clear();
       paint(container);
     });
   });
@@ -476,7 +470,6 @@ function wireEvents(container) {
   container.querySelectorAll('[data-status]').forEach((chip) => {
     chip.addEventListener('click', () => {
       state.statusFilter = chip.dataset.status;
-      state.stickyIds.clear();
       paint(container);
     });
   });
@@ -484,7 +477,6 @@ function wireEvents(container) {
   container.querySelectorAll('[data-payment]').forEach((chip) => {
     chip.addEventListener('click', () => {
       state.paymentFilter = chip.dataset.payment;
-      state.stickyIds.clear();
       paint(container);
     });
   });
@@ -492,7 +484,6 @@ function wireEvents(container) {
   container.querySelectorAll('[data-sync]').forEach((chip) => {
     chip.addEventListener('click', () => {
       state.syncFilter = chip.dataset.sync;
-      state.stickyIds.clear();
       paint(container);
     });
   });
@@ -500,7 +491,6 @@ function wireEvents(container) {
   container.querySelectorAll('[data-date]').forEach((chip) => {
     chip.addEventListener('click', async () => {
       state.dateFilter = chip.dataset.date;
-      state.stickyIds.clear();
       if (state.dateFilter !== 'custom') {
         await loadOrders();
       }
@@ -534,14 +524,14 @@ function wireEvents(container) {
 
     const shipBtn = e.target.closest('.btn-mark-shipping');
     if (shipBtn) {
-      handleStatusUpdate(shipBtn.dataset.id, 'shipping', null, container, 'Đã chuyển sang Đang vận chuyển', true);
+      handleStatusUpdate(shipBtn.dataset.id, 'shipping', null, container, 'Đã chuyển sang Đang vận chuyển');
       return;
     }
 
     const quickStatusBtn = e.target.closest('.btn-quick-status');
     if (quickStatusBtn) {
       const newStatus = quickStatusBtn.dataset.status;
-      handleStatusUpdate(quickStatusBtn.dataset.id, newStatus, null, container, `Đã chuyển sang ${STATUS_LABELS[newStatus]}`, true);
+      handleStatusUpdate(quickStatusBtn.dataset.id, newStatus, null, container, `Đã chuyển sang ${STATUS_LABELS[newStatus]}`);
       return;
     }
 
