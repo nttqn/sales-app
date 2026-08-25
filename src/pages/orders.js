@@ -227,15 +227,25 @@ function statusBadgeHtml(status) {
   return `<span class="status-badge status-${status}">${STATUS_LABELS[status] || status}</span>`;
 }
 
+function orderItemsSummaryText(o) {
+  return (o.order_items || [])
+    .slice()
+    .sort((a, b) => a.product_name.localeCompare(b.product_name))
+    .map((it) => `${it.product_name}${Number(it.qty) > 1 ? ` x${it.qty}` : ''}`)
+    .join(', ');
+}
+
 function orderItemsLineHtml(o) {
   const items = o.order_items || [];
   if (!items.length) return '';
-  const text = items
-    .slice()
-    .sort((a, b) => a.product_name.localeCompare(b.product_name))
-    .map((it) => `${escapeHtml(it.product_name)}${Number(it.qty) > 1 ? ` x${it.qty}` : ''}`)
-    .join(', ');
-  return `<div class="order-items-line">${text}</div>`;
+  const text = orderItemsSummaryText(o);
+  return `
+    <div class="order-items-line pos-copyable-wrap">
+      <span>${escapeHtml(text)}</span>
+      <button type="button" class="copy-btn btn-copy-items" data-copy="${escapeAttr(text)}" data-copy-label="Đã sao chép danh sách sản phẩm" aria-label="Sao chép danh sách sản phẩm">
+        <i data-lucide="copy"></i>
+      </button>
+    </div>`;
 }
 
 function orderRowHtml(o) {
@@ -419,6 +429,15 @@ async function handleStatusUpdate(orderId, newStatus, paymentMethod, container, 
   }
 }
 
+async function copyToClipboard(text, label) {
+  try {
+    await navigator.clipboard.writeText(String(text));
+    showToast(label || 'Đã sao chép', 'success');
+  } catch (err) {
+    showToast('Không thể sao chép', 'error');
+  }
+}
+
 function paymentLabel(m) {
   return PAYMENT_LABELS[m] || m;
 }
@@ -484,6 +503,13 @@ function wireEvents(container) {
   }
 
   container.querySelector('#order-list').addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('.btn-copy-items');
+    if (copyBtn) {
+      e.stopPropagation();
+      copyToClipboard(copyBtn.dataset.copy, copyBtn.dataset.copyLabel);
+      return;
+    }
+
     const shipBtn = e.target.closest('.btn-mark-shipping');
     if (shipBtn) {
       handleStatusUpdate(shipBtn.dataset.id, 'shipping', null, container, 'Đã chuyển sang Đang vận chuyển');
