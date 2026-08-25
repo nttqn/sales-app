@@ -288,10 +288,10 @@ function orderRowHtml(o) {
             ? `<div class="product-row-footer">
                 <span></span>
                 <div style="display:flex; gap:8px;">
-                  <button type="button" class="btn-icon-text btn-quick-status btn-status-danger" data-id="${o.id}" data-status="returned" title="Chuyển hoàn">
+                  <button type="button" class="btn-icon-text btn-quick-status btn-status-danger" data-id="${o.id}" data-new-status="returned" title="Chuyển hoàn">
                     <i data-lucide="x"></i> Chuyển hoàn
                   </button>
-                  <button type="button" class="btn-icon-text btn-quick-status btn-status-success" data-id="${o.id}" data-status="completed" title="Hoàn thành">
+                  <button type="button" class="btn-icon-text btn-quick-status btn-status-success" data-id="${o.id}" data-new-status="completed" title="Hoàn thành">
                     <i data-lucide="check"></i> Hoàn thành
                   </button>
                 </div>
@@ -530,7 +530,7 @@ function wireEvents(container) {
 
     const quickStatusBtn = e.target.closest('.btn-quick-status');
     if (quickStatusBtn) {
-      const newStatus = quickStatusBtn.dataset.status;
+      const newStatus = quickStatusBtn.dataset.newStatus;
       handleStatusUpdate(quickStatusBtn.dataset.id, newStatus, null, container, `Đã chuyển sang ${STATUS_LABELS[newStatus]}`);
       return;
     }
