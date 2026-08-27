@@ -37,6 +37,7 @@ const state = {
   dateFilter: 'all', // all | today | yesterday | last_7_days | this_week | last_week | this_month | last_month | custom
   customFrom: '',
   customTo: '',
+  editingItemId: null, // id order_item đang được sửa giá trong modal chi tiết đơn
   realtimeChannel: null,
 };
 
@@ -349,24 +350,39 @@ function profitSectionHtml(order) {
   return `<p class="empty-sub" style="margin-top:12px;">Lợi nhuận sẽ được tính khi đơn ở trạng thái Hoàn thành, Chuyển hoàn hoặc Thất lạc</p>`;
 }
 
+function orderItemRowHtml(it) {
+  const isEditing = state.editingItemId === it.id;
+  const priceHtml = isEditing
+    ? `<input type="number" class="form-input order-item-price-input" data-item-id="${it.id}" value="${it.unit_price}" min="0" step="1000" style="max-width:110px; padding:4px 8px;">`
+    : `<span>${formatCurrency(it.unit_price)}</span>
+       <button type="button" class="icon-btn edit-order-item-price-btn" data-item-id="${it.id}" aria-label="Sửa giá" style="width:22px; height:22px;">
+         <i data-lucide="pencil"></i>
+       </button>`;
+
+  return `
+    <div class="history-row">
+      <div>
+        <div class="history-reason">${escapeHtml(it.product_name)} ${Number(it.stock_shortfall) > 0 ? `<span class="badge-warning">Thiếu ${it.stock_shortfall}</span>` : ''}</div>
+        <div class="history-date" style="display:flex; align-items:center; gap:4px;">${priceHtml}<span>x ${it.qty}</span></div>
+      </div>
+      <div class="history-qty">${formatCurrency(it.qty * it.unit_price)}</div>
+    </div>`;
+}
+
 function openOrderDetail(container, order) {
-  const modal = container.querySelector('#modal-order-detail');
+  state.editingItemId = null;
+  renderOrderDetailBody(container, order);
+  container.querySelector('#modal-order-detail').classList.add('active');
+}
+
+function renderOrderDetailBody(container, order) {
   const body = container.querySelector('#order-detail-body');
   const channelLabel = order.channel === 'online' ? 'Online' : 'Tại quầy';
 
   const itemsHtml = (order.order_items || [])
     .slice()
     .sort((a, b) => a.product_name.localeCompare(b.product_name))
-    .map(
-      (it) => `
-      <div class="history-row">
-        <div>
-          <div class="history-reason">${escapeHtml(it.product_name)} ${Number(it.stock_shortfall) > 0 ? `<span class="badge-warning">Thiếu ${it.stock_shortfall}</span>` : ''}</div>
-          <div class="history-date">${formatCurrency(it.unit_price)} x ${it.qty}</div>
-        </div>
-        <div class="history-qty">${formatCurrency(it.qty * it.unit_price)}</div>
-      </div>`
-    )
+    .map(orderItemRowHtml)
     .join('');
 
   const isLocked = LOCKED_STATUSES.includes(order.status);
@@ -420,8 +436,79 @@ function openOrderDetail(container, order) {
     handleStatusUpdate(order.id, newStatus, newPayment, container, 'Đã lưu thay đổi đơn hàng');
   });
 
-  modal.classList.add('active');
+  body.querySelectorAll('.edit-order-item-price-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.editingItemId = btn.dataset.itemId;
+      renderOrderDetailBody(container, order);
+      const input = body.querySelector('.order-item-price-input');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  });
+
+  const priceInput = body.querySelector('.order-item-price-input');
+  if (priceInput) {
+    priceInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        priceInput.blur();
+      } else if (e.key === 'Escape') {
+        state.editingItemId = null;
+        renderOrderDetailBody(container, order);
+      }
+    });
+    priceInput.addEventListener('focusout', () => {
+      commitItemPriceEdit(container, order, priceInput.dataset.itemId, priceInput.value);
+    });
+  }
+
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+async function commitItemPriceEdit(container, order, itemId, rawValue) {
+  state.editingItemId = null;
+  const item = (order.order_items || []).find((it) => it.id === itemId);
+  if (!item) return;
+
+  const newPrice = Number(rawValue);
+  if (!Number.isFinite(newPrice) || newPrice < 0) {
+    showToast('Giá không hợp lệ', 'error');
+    renderOrderDetailBody(container, order);
+    return;
+  }
+
+  if (newPrice === Number(item.unit_price)) {
+    renderOrderDetailBody(container, order);
+    return;
+  }
+
+  try {
+    const { error: itemError } = await supabase.from('order_items').update({ unit_price: newPrice }).eq('id', itemId);
+    if (itemError) throw itemError;
+
+    item.unit_price = newPrice;
+    const newSubtotal = (order.order_items || []).reduce((s, it) => s + Number(it.qty) * Number(it.unit_price), 0);
+    const newTotal = newSubtotal - Number(order.discount || 0);
+
+    const { error: orderError } = await supabase
+      .from('orders')
+      .update({ subtotal: newSubtotal, total: newTotal })
+      .eq('id', order.id);
+    if (orderError) throw orderError;
+
+    order.subtotal = newSubtotal;
+    order.total = newTotal;
+
+    showToast('Đã cập nhật giá sản phẩm', 'success');
+    renderOrderDetailBody(container, order);
+    await loadOrders();
+    renderOrderList(container);
+  } catch (err) {
+    showToast(err.message || 'Lỗi khi cập nhật giá', 'error');
+    renderOrderDetailBody(container, order);
+  }
 }
 
 async function handleStatusUpdate(orderId, newStatus, paymentMethod, container, successMessage) {
