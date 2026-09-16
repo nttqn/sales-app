@@ -186,6 +186,7 @@ function paint(container) {
     </div>
     ${state.dateFilter === 'custom' ? customDateRangeHtml() : ''}
 
+    <div id="order-count" class="order-count-line">${orderCountLabel(list.length)}</div>
     <div id="order-list">
       ${list.length ? list.map(orderRowHtml).join('') : emptyStateHtml()}
     </div>
@@ -202,7 +203,13 @@ function renderOrderList(container) {
   if (!el) return;
   const list = getFiltered();
   el.innerHTML = list.length ? list.map(orderRowHtml).join('') : emptyStateHtml();
+  const countEl = container.querySelector('#order-count');
+  if (countEl) countEl.textContent = orderCountLabel(list.length);
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function orderCountLabel(count) {
+  return `${count} đơn hàng`;
 }
 
 function customDateRangeHtml() {
